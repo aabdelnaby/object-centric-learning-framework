@@ -9,13 +9,19 @@ defaults:
 
 # The following parameters assume training on 8 GPUs, leading to an effective batch size of 64.
 trainer:
-  devices: 8
+  devices: 4
   max_steps: 500000
-  max_epochs:
 
 dataset:
   num_workers: 4
-  batch_size: 8
+  batch_size: 16
+
+experiment:
+  hierarchy:
+    depth: 2                 # 1 = parent only, 2 = parent+child
+    child_per_parent: 3      # K2 children per parent
+    child_loss_weight: 1.0   # set to 0.0 to disable child optimization
+    child2_loss_weight: 1.0  # weight for level-3 (grandchild) reconstruction
 
 models:
   conditioning:
@@ -36,9 +42,94 @@ models:
       features: [1024, 1024, 1024]
     object_features_path: perceptual_grouping.objects
 
+  # Build child slots per parent (inference-only refinement)
+  hierarchical_refine:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: perceptual_grouping.objects
+    parent_masks_path: object_decoder.masks
+    child_per_parent: ${experiment.hierarchy.child_per_parent}
+    slot_dim: ${models.conditioning.object_dim}
+    sa_iters: 3
+
+  # Decode children and gate by parent regions
+  object_decoder_child:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: ${models.perceptual_grouping.object_dim}
+    output_dim: ${experiment.input_feature_dim}
+    num_patches: 784
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine.child_objects
+    gating_mask_path: hierarchical_refine.child_gating_masks
+    image_path: input.image
+
+  # Level 3: decompose each child into grandchildren if desired
+  hierarchical_refine_l2:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: hierarchical_refine.child_objects
+    parent_masks_path: object_decoder_child.masks
+    child_per_parent: ${experiment.hierarchy.child_per_parent}
+    slot_dim: ${models.conditioning.object_dim}
+    sa_iters: 3
+
+  object_decoder_grandchild:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: ${models.perceptual_grouping.object_dim}
+    output_dim: ${experiment.input_feature_dim}
+    num_patches: 784
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine_l2.child_objects
+    gating_mask_path: hierarchical_refine_l2.child_gating_masks
+    image_path: input.image
+
   masks_as_image:
     _target_: routed.ocl.utils.resizing.Resize
     input_path: object_decoder.masks
     size: 128
     resize_mode: bilinear
     patch_mode: true
+
+  # Resized child masks for visualization
+  child_masks_as_image:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder_child.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true
+
+  # Resized grandchild masks for visualization
+  grandchild_masks_as_image:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder_grandchild.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true
+
+visualizations:
+  child_masks:
+    _target_: routed.ocl.visualizations.Mask
+    mask_path: child_masks_as_image
+  grandchild_masks:
+    _target_: routed.ocl.visualizations.Mask
+    mask_path: grandchild_masks_as_image
+
+losses:
+  mse_child:
+    _target_: routed.ocl.losses.ReconstructionLoss
+    loss_type: mse
+    weight: "${eval_lambda:'lambda d, w: 0.0 if d < 2 else w', ${experiment.hierarchy.depth}, ${experiment.hierarchy.child_loss_weight}}"
+    input_path: object_decoder_child.reconstruction
+    target_path: object_decoder.target
+  mse_child2:
+    _target_: routed.ocl.losses.ReconstructionLoss
+    loss_type: mse
+    weight: "${eval_lambda:'lambda d, w: 0.0 if d < 3 else w', ${experiment.hierarchy.depth}, ${experiment.hierarchy.child2_loss_weight}}"
+    input_path: object_decoder_grandchild.reconstruction
+    target_path: object_decoder.target

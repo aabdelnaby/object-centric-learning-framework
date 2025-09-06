@@ -36,7 +36,7 @@ dataset:
 defaults:
   - /evaluation_config
   - /evaluation/projects/bridging/_base_metrics
-  - /dataset: movi_e_image
+  - /dataset: movi_c_image
   - _self_
 
 eval_batch_size: 1
@@ -48,7 +48,74 @@ outputs_to_store:
   - input.orig_image
   - input.mask
   - masks_resized
+  - parent_masks_128
+  - child_masks_128
+  - grandchild_masks_128
 
 modules:
   masks_resized:
     size_tensor_path: input.mask
+  # Add hierarchical refinement and child decoder at eval time
+  hierarchical_refine:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: perceptual_grouping.objects
+    parent_masks_path: object_decoder.masks
+    child_per_parent: 2
+    slot_dim: 128
+    sa_iters: 3
+  object_decoder_child:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: 128
+    output_dim: 384
+    num_patches: 784
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine.child_objects
+    gating_mask_path: hierarchical_refine.child_gating_masks
+  # Level 3 at eval time
+  hierarchical_refine_l2:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: hierarchical_refine.child_objects
+    parent_masks_path: object_decoder_child.masks
+    child_per_parent: 2
+    slot_dim: 128
+    sa_iters: 3
+  object_decoder_grandchild:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: 128
+    output_dim: 384
+    num_patches: 784
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine_l2.child_objects
+    gating_mask_path: hierarchical_refine_l2.child_gating_masks
+  parent_masks_128:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true
+  child_masks_128:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder_child.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true
+  grandchild_masks_128:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder_grandchild.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true
+  masks_as_image:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true

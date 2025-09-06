@@ -12,6 +12,7 @@ import hydra
 import hydra_zen
 import pytorch_lightning as pl
 import torch
+from pathlib import Path
 
 import ocl.cli._config  # noqa: F401
 from ocl.cli import cli_utils, eval_utils, train
@@ -40,7 +41,7 @@ class EvaluationConfig:
     # Setting this allows to evaluate on different metrics than the model was trained on
     evaluation_metrics: Optional[Dict[str, Any]] = None
 
-    save_outputs: bool = False
+    save_outputs: bool = True
     skip_metrics: bool = False
     outputs_dirname: str = "outputs"
     outputs_to_store: Optional[List[str]] = None
@@ -107,7 +108,7 @@ def evaluate(config: EvaluationConfig):
     with hydra.initialize_config_dir(config_dir=config_dir):
         overrides = config.train_config_overrides if config.train_config_overrides else []
         train_config = hydra.compose(os.path.splitext(config_name)[0], overrides=overrides)
-        train_config.dataset.eval_batch_size = config.eval_batch_size
+        train_config.dataset.batch_size = config.eval_batch_size
 
         datamodule, model = eval_utils.build_from_train_config(train_config, config.checkpoint_path)
 
@@ -130,6 +131,7 @@ def evaluate(config: EvaluationConfig):
     if config.skip_metrics:
         model.evaluation_metrics = torch.nn.ModuleDict()
 
+    #config.save_outputs = True  #<-- hardcoded
     if config.save_outputs:
         if config.outputs_to_store is None:
             raise ValueError("Need to specify which outputs to store using `outputs_to_store`")

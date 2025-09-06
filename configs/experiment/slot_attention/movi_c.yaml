@@ -7,7 +7,7 @@ defaults:
   - _self_
 
 trainer:
-  devices: 8
+  devices: 4
   max_steps: 500000
   max_epochs:
   gradient_clip_val: 1.0

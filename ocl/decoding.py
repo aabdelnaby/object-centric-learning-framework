@@ -447,6 +447,7 @@ class PatchDecoder(nn.Module):
         object_features: torch.Tensor,
         target: Optional[torch.Tensor] = None,
         image: Optional[torch.Tensor] = None,
+        gating_mask: Optional[torch.Tensor] = None,
     ):
         assert object_features.dim() >= 3  # Image or video data.
         if self.upsample_target is not None and target is not None:
@@ -477,6 +478,14 @@ class PatchDecoder(nn.Module):
         # Split out alpha channel and normalize over slots.
         decoded_patches, alpha = output.split([self.output_dim, 1], dim=-1)
         alpha = alpha.softmax(dim=-3)
+
+        # Optional gating: confine masks to provided regions and renormalize per token.
+        if gating_mask is not None:
+            # alpha: [B, K, N, 1] -> masks: [B, K, N]
+            masks = alpha.squeeze(-1)
+            masks = masks * gating_mask
+            masks = masks / (masks.sum(dim=1, keepdim=True) + 1e-6)
+            alpha = masks.unsqueeze(-1)
 
         reconstruction = torch.sum(decoded_patches * alpha, dim=-3)
         masks = alpha.squeeze(-1)

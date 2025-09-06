@@ -8,7 +8,7 @@ defaults:
   - _self_
 
 trainer:
-  devices: 8
+  devices: 1
   gradient_clip_val: 0.05
   gradient_clip_algorithm: norm
   max_epochs:

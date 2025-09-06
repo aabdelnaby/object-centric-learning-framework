@@ -13,3 +13,69 @@ eval_batch_size: 16
 modules:
   masks_resized:
     size_tensor_path: input.mask
+  # Add hierarchy at eval time
+  hierarchical_refine:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: perceptual_grouping.objects
+    parent_masks_path: object_decoder.masks
+    child_per_parent: 2
+    slot_dim: 128
+    sa_iters: 3
+  object_decoder_child:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: 128
+    output_dim: 384
+    num_patches: 784
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine.child_objects
+    gating_mask_path: hierarchical_refine.child_gating_masks
+    image_path: input.image
+  # Level 3 at eval time
+  hierarchical_refine_l2:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: hierarchical_refine.child_objects
+    parent_masks_path: object_decoder_child.masks
+    child_per_parent: 2
+    slot_dim: 128
+    sa_iters: 3
+  object_decoder_grandchild:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: 128
+    output_dim: 384
+    num_patches: 784
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine_l2.child_objects
+    gating_mask_path: hierarchical_refine_l2.child_gating_masks
+    image_path: input.image
+  visualize:
+    _target_: ocl.visualization.save_visualizations.SaveVisualizationsHook
+    targets:
+      - input.image
+      - input.mask
+      - object_decoder.reconstruction  # Final reconstruction
+      - object_decoder.object_reconstructions  # Individual objects
+      - object_decoder.masks  # Segmentation masks
+      - object_decoder_child.masks  # Child segmentation masks
+      - object_decoder_grandchild.masks  # Grandchild segmentation masks
+    n_samples: 50
+    output_dir: ${hydra:runtime.output_dir}/visualizations
+
+save_outputs: true
+skip_metrics: true
+n_samples_to_store: 350
+outputs_to_store:
+  - input.image
+  - input.mask
+  - object_decoder.reconstruction
+  - object_decoder.object_reconstructions
+  - object_decoder.masks
+  - object_decoder_child.masks
+  - object_decoder_grandchild.masks
