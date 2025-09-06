@@ -1,0 +1,6 @@
+LexerNoViableAltException:  
+                           ^
+See https://hydra.cc/docs/1.2/advanced/override_grammar/basic for details
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.
+/var/spool/slurmd/job1361904/slurm_script: line 17: +checkpoint_path=/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/lightning_logs/version_1254220/checkpoints/epoch_1-step_10000.ckpt: No such file or directory

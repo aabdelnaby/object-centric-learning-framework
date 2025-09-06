@@ -1,0 +1,9 @@
+{
+  "train_config_path": "/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/projects/bridging/dinosaur/movi_c_feat_rec/2025-09-05_15-11-10/config/config.yaml",
+  "checkpoint_path": "/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/epoch_98-step_90924.ckpt",
+  "metrics": {
+    "val": {
+      "mse": 0.21195672452449799
+    }
+  }
+}

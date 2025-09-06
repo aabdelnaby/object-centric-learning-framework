@@ -1,0 +1,7 @@
+In 'experiment/projects/bridging/dinosaur/movi_c_feat_rec': ConfigKeyError raised while composing config:
+Key 'resume_from_checkpoint' not in 'Builds_Trainer'
+    full_key: trainer.resume_from_checkpoint
+    reference_type=Builds_Trainer
+    object_type=Builds_Trainer
+
+Set the environment variable HYDRA_FULL_ERROR=1 for a complete stack trace.

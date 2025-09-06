@@ -1,0 +1,15 @@
+
+============================= JOB FEEDBACK =============================
+
+NodeName=uc2n578
+Job ID: 1361894
+Cluster: uc3
+User/Group: kn_pop550892/kn_kn
+State: FAILED (exit code 1)
+Nodes: 1
+Cores per node: 24
+CPU Utilized: 00:00:06
+CPU Efficiency: 0.51% of 00:19:36 core-walltime
+Job Wall-clock time: 00:00:49
+Memory Utilized: 245.32 MB
+Memory Efficiency: 0.07% of 367.19 GB (367.19 GB/node)

@@ -1,0 +1,121 @@
+train_config_path: /home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/slot_attention/movi_c/2025-08-27_21-45-13/config/config.yaml
+train_config_overrides: null
+train_config_name: null
+checkpoint_path: /home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/lightning_logs/version_1250381/checkpoints/epoch_67_step_500000.ckpt
+output_dir: exp_results/output
+report_filename: metrics.json
+modules:
+  masks_resized:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder.masks
+    size_tensor_path: input.mask
+    patch_mode: true
+    channels_last: false
+dataset:
+  eval_transforms:
+    03_preprocessing:
+      _target_: ocl.transforms.SimpleTransform
+      transforms:
+        image:
+          _target_: torchvision.transforms.Compose
+          transforms:
+          - _target_: torchvision.transforms.ToTensor
+          - _target_: torchvision.transforms.Resize
+            size: 224
+            interpolation: ${torchvision_interpolation_mode:BICUBIC}
+          - '${lambda_fn:''lambda image: image.clamp(0.0, 1.0)''}'
+          - _target_: torchvision.transforms.Normalize
+            mean:
+            - 0.485
+            - 0.456
+            - 0.406
+            std:
+            - 0.229
+            - 0.224
+            - 0.225
+        mask:
+          _target_: torchvision.transforms.Compose
+          transforms:
+          - _target_: ocl.preprocessing.MultiMaskToTensor
+          - _target_: ocl.preprocessing.CheckFormat
+            shape:
+            - 11
+            - 128
+            - 128
+            one_hot: true
+      batch_transform: false
+    00_1_rename_fields:
+      _target_: ocl.transforms.Map
+      transform:
+        _target_: ocl.preprocessing.RenameFields
+        mapping:
+          video: image
+          segmentations: mask
+      fields:
+      - video
+      - segmentations
+      batch_transform: false
+    00_2_adapt_mask_format:
+      _target_: ocl.transforms.SimpleTransform
+      transforms:
+        mask:
+          _target_: ocl.preprocessing.IntegerToOneHotMask
+          output_axis: -4
+          max_instances: 10
+          ignore_typical_background: false
+      batch_transform: false
+    02_sample_frames:
+      _target_: ocl.transforms.SampleSlices
+      fields:
+      - image
+      - mask
+      n_slices_per_input: -1
+      dim: 0
+      seed: 457834753
+      shuffle_buffer_size: 1
+  _target_: ocl.datasets.WebdatasetDataModule
+  train_shards: ${oc.env:DATASET_PREFIX}/movi_c/train/shard-{000000..000298}.tar
+  train_size: 87633
+  val_shards: ${oc.env:DATASET_PREFIX}/movi_c/val/shard-{000000..000007}.tar
+  val_size: 6000
+  test_shards: ${oc.env:DATASET_PREFIX}/movi_c/val/shard-{000000..000007}.tar
+  test_size: 6000
+  use_autopadding: true
+  train_transforms:
+    00_1_rename_fields:
+      _target_: ocl.transforms.Map
+      transform:
+        _target_: ocl.preprocessing.RenameFields
+        mapping:
+          video: image
+      fields:
+      - video
+      batch_transform: false
+    02_sample_frames:
+      _target_: ocl.transforms.SampleSlices
+      fields:
+      - image
+      n_slices_per_input: 9
+      dim: 0
+      seed: 457834752
+      shuffle_buffer_size: 1000
+evaluation_metrics:
+  ari:
+    _target_: routed.ocl.metrics.ARIMetric
+    prediction_path: masks_resized
+    target_path: input.mask
+    foreground: true
+  abo:
+    _target_: routed.ocl.metrics.AverageBestOverlapMetric
+    prediction_path: masks_resized
+    target_path: input.mask
+    ignore_background: true
+save_outputs: false
+skip_metrics: false
+outputs_dirname: outputs
+outputs_to_store: null
+n_samples_to_store: null
+eval_train: false
+eval_val: true
+eval_test: false
+eval_batch_size: 16

@@ -1,0 +1,4 @@
+- +train_config_path=/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/projects/bridging/dinosaur/movi_c_feat_rec/2025-08-28_15-40-44/config/config.yaml
+- +evaluation=projects/bridging/metrics_movi_c.yaml
+- +checkpoint_path=/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/lightning_logs/version_1254220/checkpoints/epoch_1-step_10000.ckpt
+- +output_dir=exp_results/output_eval

@@ -1,0 +1,15 @@
+
+============================= JOB FEEDBACK =============================
+
+NodeName=uc2n578
+Job ID: 1361904
+Cluster: uc3
+User/Group: kn_pop550892/kn_kn
+State: FAILED (exit code 127)
+Nodes: 1
+Cores per node: 24
+CPU Utilized: 00:00:05
+CPU Efficiency: 0.99% of 00:08:24 core-walltime
+Job Wall-clock time: 00:00:21
+Memory Utilized: 292.05 MB
+Memory Efficiency: 0.08% of 367.19 GB (367.19 GB/node)
