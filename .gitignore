@@ -1,5 +1,16 @@
 # Hydra default log folder
 outputs/
+visualization_results/
+slurm_jobs_logs/
+lightning_logs/
+
+# Model artifacts
+*.ckpt
+*.pt
+*.pth
+
+# s 
+scripts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
