@@ -1,9 +1,18 @@
 {
-  "train_config_path": "/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/projects/bridging/dinosaur/movi_c_feat_rec/2025-09-05_15-11-10/config/config.yaml",
-  "checkpoint_path": "/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/epoch_98-step_90924.ckpt",
+  "train_config_path": "/pfs/data6/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/projects/bridging/dinosaur/coco_feat_rec_dino_small16_auto/2025-10-07_21-10-41/config/config_val_flat.yaml",
+  "checkpoint_path": "/pfs/data6/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/checkpoints/epoch_67-step_500000_coco.ckpt",
   "metrics": {
+    "train": {
+      "val/mse": 0.014755169861018658,
+      "val/mse_child": 0.0,
+      "val/mse_child2": 0.0,
+      "val/loss_total": 0.014755169861018658
+    },
     "val": {
-      "mse": 0.21195672452449799
+      "mse": 0.01493680290877819,
+      "mse_child": 0.0,
+      "mse_child2": 0.0,
+      "loss_total": 0.01493680290877819
     }
   }
 }
