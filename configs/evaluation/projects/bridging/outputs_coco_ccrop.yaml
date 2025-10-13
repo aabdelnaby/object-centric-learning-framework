@@ -24,6 +24,9 @@ outputs_to_store:
   - input.orig_image
   - input.instance_mask
   - masks_resized
+  - parent_masks_128
+  - child_masks_128
+  - grandchild_masks_128
 
 plugins:
   03b_preprocessing:

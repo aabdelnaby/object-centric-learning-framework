@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 import hydra
 import hydra_zen
 import pytorch_lightning as pl
+import torch
 from omegaconf import SI
 
 import ocl.cli._config  # noqa: F401
@@ -109,6 +110,7 @@ def build_model_from_config(
             vis_log_frequency=train_vis_freq,
         )
     else:
+        map_location = None if torch.cuda.is_available() else torch.device("cpu")
         model = CombinedModel.load_from_checkpoint(
             checkpoint_path,
             models=models,
@@ -118,6 +120,7 @@ def build_model_from_config(
             training_metrics=training_metrics,
             evaluation_metrics=evaluation_metrics,
             vis_log_frequency=train_vis_freq,
+            map_location=map_location,
         )
     return model
 

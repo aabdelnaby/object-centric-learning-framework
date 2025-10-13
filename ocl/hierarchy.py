@@ -16,11 +16,13 @@ class HierarchicalSlots(nn.Module):
 
     Outputs (dict):
       - child_objects: Float[B, K1*K2, D_slots]  Refined child slots
-      - child_gating_masks: Float[B, K1*K2, N]   Gating masks per child (copied parent masks)
+      - child_gating_masks: Float[B, K1*K2, N]   Child-specific gating masks
 
     Notes:
-      - Implementation is inference-only by default; parameters are created but training is not required.
-      - Uses a tiny Slot Attention loop over K2 children per parent, gated by the parent mask.
+      - By default, child gating can be created from SlotAttention attention maps, which softly
+        splits the parent region across K2 children. When disabled, the parent mask is copied for
+        each child (previous behaviour).
+      - Uses a small Slot Attention loop over K2 children per parent, gated by the parent mask.
     """
 
     def __init__(
@@ -34,6 +36,10 @@ class HierarchicalSlots(nn.Module):
         use_projection_bias: bool = False,
         use_implicit_differentiation: bool = False,
         res_mlp: bool = True,
+        feature_dim: Optional[int] = None,
+        use_sa_attention_for_gating: bool = True,
+        use_straight_through_gumbel: bool = False,
+        gumbel_temperature: float = 1.0,
     ):
         super().__init__()
         self.K2 = int(child_per_parent)
@@ -44,6 +50,10 @@ class HierarchicalSlots(nn.Module):
         self.kvq_dim = kvq_dim
         self.use_projection_bias = bool(use_projection_bias)
         self.use_implicit_differentiation = bool(use_implicit_differentiation)
+        # If True, derive child gating from SA attention over tokens; else copy parent mask per child
+        self.use_sa_attention_for_gating = bool(use_sa_attention_for_gating)
+        self.use_straight_through_gumbel = bool(use_straight_through_gumbel)
+        self.gumbel_temperature = float(gumbel_temperature)
 
         # Slot-wise MLP as in SlotAttentionGrouping
         self.mlp = nn.Sequential(
@@ -57,6 +67,20 @@ class HierarchicalSlots(nn.Module):
 
         # Lazily built SlotAttention instance with correct feature_dim
         self._sa: Optional[SlotAttention] = None
+
+        # Optionally pre-initialize SlotAttention so it exists at checkpoint load time
+        if feature_dim is not None:
+            self._sa = SlotAttention(
+                dim=self.slot_dim,
+                feature_dim=int(feature_dim),
+                kvq_dim=self.kvq_dim,
+                n_heads=self.n_heads,
+                iters=self.sa_iters,
+                ff_mlp=self.mlp,
+                use_projection_bias=self.use_projection_bias,
+                use_implicit_differentiation=self.use_implicit_differentiation,
+            )
+            
 
     def _build_sa_if_needed(self, feature_dim: int, device: torch.device, dtype: torch.dtype):
         if self._sa is None:
@@ -113,16 +137,40 @@ class HierarchicalSlots(nn.Module):
                 all_large = True
 
             if all_large:
-                # Gate tokens by parent mask: scale features token-wise so that K/V outside region vanish
+                # Gate tokens by parent mask: scale features token-wise so K/V outside region vanish
                 denom = w_parent.mean(dim=-1, keepdim=True)
                 safe = (denom > 1e-6).float()
                 w_scaled = safe * (w_parent / (denom + 1e-6)) + (1.0 - safe) * 1.0
                 tokens_gated = tokens * w_scaled.unsqueeze(-1)
-                slots, _ = self._sa(tokens_gated, slots)
+                slots, attn = self._sa(tokens_gated, slots)  # attn: [B, K2, N]
+            else:
+                attn = None
 
             child_slots_out.append(slots)  # [B, K2, Ds]
-            # Duplicate gating mask per child
-            child_masks_out.append(w_parent[:, None, :].expand(-1, self.K2, -1))  # [B, K2, N]
+
+            if self.use_sa_attention_for_gating and (attn is not None):
+                # Build child-specific gating from attention and confine to parent region.
+                # attn: [B, K2, N], w_parent: [B, N]
+                if self.use_straight_through_gumbel:
+                    if self.training:
+                        logits = torch.log(attn + 1e-9)
+                        hard_assign = F.gumbel_softmax(
+                            logits.transpose(1, 2),
+                            tau=self.gumbel_temperature,
+                            hard=True,
+                            dim=-1,
+                        ).transpose(1, 2)
+                    else:
+                        indices = attn.argmax(dim=1)
+                        hard_assign = torch.zeros_like(attn)
+                        hard_assign.scatter_(1, indices.unsqueeze(1), 1.0)
+                    masks_raw = hard_assign * w_parent[:, None, :]
+                else:
+                    masks_raw = attn * w_parent[:, None, :]
+                child_masks_out.append(masks_raw)
+            else:
+                # Previous behaviour: duplicate parent mask for each child
+                child_masks_out.append(w_parent[:, None, :].expand(-1, self.K2, -1))  # [B, K2, N]
 
         child_objects = torch.cat(child_slots_out, dim=1) if K1 > 0 else torch.empty(
             B, 0, Ds, device=tokens.device, dtype=tokens.dtype

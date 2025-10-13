@@ -14,27 +14,47 @@ trainer:
 
 dataset:
   num_workers: 4
-  batch_size: 16
+  batch_size: 8
 
 experiment:
+  # Match ViT-S/8 embed dimension (not ADE20K classes)
+  input_feature_dim: 384
   hierarchy:
-    depth: 2                 # 1 = parent only, 2 = parent+child
-    child_per_parent: 3      # K2 children per parent
-    child_loss_weight: 1.0   # set to 0.0 to disable child optimization
-    child2_loss_weight: 1.0  # weight for level-3 (grandchild) reconstruction
+    depth: 3                 # 1 = parent only, 2 = parent+child
+    child_per_parent: 2      # K2 children per parent
+    child_loss_weight: 0.3   # set to 0.0 to disable child optimization
+    child2_loss_weight: 0.2  # weight for level-3 (grandchild) reconstruction
 
 models:
   conditioning:
     _target_: routed.ocl.conditioning.RandomConditioning
-    n_slots: 11
+    n_slots: 4
     object_dim: 128
 
     batch_size_path: input.batch_size
   feature_extractor:
+    _target_: routed.ocl.feature_extractors.TimmFeatureExtractor
     model_name: vit_small_patch8_224_dino
+    pretrained: true
+    freeze: true
+    feature_level: 12  # Use the final layer features
+
+  # Override positional embedding to project from ViT token dim (384) -> slot feature dim
+  perceptual_grouping:
+    positional_embedding:
+      _target_: ocl.neural_networks.wrappers.Sequential
+      _args_:
+        - _target_: ocl.neural_networks.positional_embedding.DummyPositionEmbed
+        - _target_: ocl.neural_networks.build_two_layer_mlp
+          input_dim: 384          # ViT-S/8 embed dim
+          output_dim: ${....feature_dim}
+          hidden_dim: 384
+          initial_layer_norm: true
 
   object_decoder:
     _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: ${models.perceptual_grouping.object_dim}
+    output_dim: ${experiment.input_feature_dim}  # Now 384
     num_patches: 784
     decoder:
       _target_: ocl.neural_networks.build_mlp
@@ -42,7 +62,7 @@ models:
       features: [1024, 1024, 1024]
     object_features_path: perceptual_grouping.objects
 
-  # Build child slots per parent (inference-only refinement)
+  # Build child slots per parent 
   hierarchical_refine:
     _target_: routed.ocl.hierarchy.HierarchicalSlots
     tokens_path: feature_extractor.features
@@ -51,12 +71,16 @@ models:
     child_per_parent: ${experiment.hierarchy.child_per_parent}
     slot_dim: ${models.conditioning.object_dim}
     sa_iters: 3
+    feature_dim: null   # infer from tokens at runtime (matches ViT embed dim)
+    use_sa_attention_for_gating: true
+    use_straight_through_gumbel: true
+    gumbel_temperature: 1.0
 
   # Decode children and gate by parent regions
   object_decoder_child:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: ${models.perceptual_grouping.object_dim}
-    output_dim: ${experiment.input_feature_dim}
+    output_dim: ${experiment.input_feature_dim}  # Now 384
     num_patches: 784
     decoder:
       _target_: ocl.neural_networks.build_mlp
@@ -75,11 +99,15 @@ models:
     child_per_parent: ${experiment.hierarchy.child_per_parent}
     slot_dim: ${models.conditioning.object_dim}
     sa_iters: 3
+    feature_dim: null   # infer from tokens at runtime (matches ViT embed dim)
+    use_sa_attention_for_gating: true
+    use_straight_through_gumbel: true
+    gumbel_temperature: 1.0
 
   object_decoder_grandchild:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: ${models.perceptual_grouping.object_dim}
-    output_dim: ${experiment.input_feature_dim}
+    output_dim: ${experiment.input_feature_dim}  # Now 384
     num_patches: 784
     decoder:
       _target_: ocl.neural_networks.build_mlp

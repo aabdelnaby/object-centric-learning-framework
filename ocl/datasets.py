@@ -1,10 +1,13 @@
 """Implementation of datasets."""
 import collections
+import csv
+import json
 import logging
 import os
 from distutils.util import strtobool
 from functools import partial
 from itertools import chain
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import braceexpand
@@ -12,9 +15,14 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torchdata
+from PIL import Image
 from torch.utils.data import DataLoader
 from torch.utils.data._utils import collate as torch_collate
 from torchdata.datapipes.iter import IterDataPipe
+
+from torchvision import transforms as tv_transforms
+from torchvision.transforms import InterpolationMode
+from torchvision.transforms import functional as tvF
 
 import ocl.utils.dataset_patches  # noqa: F401
 from ocl.data_decoding import default_decoder
@@ -392,6 +400,378 @@ class DummyDataModule(pl.LightningDataModule):
             self.test_size, _get_single_element_transforms(self.eval_transforms)
         )
         return self._create_dataloader(dataset, self.eval_batch_size)
+
+
+class ADE20KSegmentationDataset(torch.utils.data.Dataset):
+    """Semantic segmentation dataset for ADE20K in its original folder structure."""
+
+    def __init__(
+        self,
+        root: Union[str, Path],
+        split: str = "training",
+        *,
+        class_map: Optional[Dict[int, int]] = None,
+        class_names: Optional[Dict[int, str]] = None,
+        image_transform: Optional[Callable[[Image.Image], Any]] = None,
+        mask_transform: Optional[Callable[[Image.Image], Any]] = None,
+        sample_limit: Optional[int] = None,
+        background_index: int = 0,
+    ) -> None:
+        super().__init__()
+        self.root = Path(root)
+        self.split = split
+        self.split_dir = self.root / "images" / "ADE" / split
+        if not self.split_dir.exists():
+            raise ValueError(f"Split directory `{self.split_dir}` does not exist.")
+
+        self.image_transform = image_transform
+        self.mask_transform = mask_transform
+        self.background_index = background_index
+
+        self.class_map, self.class_names = self._init_class_lookup(class_map, class_names)
+        self.samples = self._discover_samples(sample_limit)
+
+        self._num_classes = max(self.class_map.values(), default=self.background_index) + 1
+
+    @staticmethod
+    def build_class_lookup(
+        root: Union[str, Path], background_index: int = 0
+    ) -> Tuple[Dict[int, int], Dict[int, str]]:
+        """Create mapping from ADE20K name indices to contiguous class ids."""
+
+        objects_file = Path(root) / "objects.txt"
+        if not objects_file.exists():
+            raise FileNotFoundError(
+                f"Could not find `objects.txt` in provided ADE20K root `{root}`."
+            )
+
+        class_map: Dict[int, int] = {}
+        class_names: Dict[int, str] = {}
+        next_index = background_index + 1
+
+        with objects_file.open("r", encoding="utf-8", errors="ignore") as handle:
+            reader = csv.reader(handle, delimiter="\t")
+            next(reader, None)  # Skip header line.
+            for row in reader:
+                if len(row) < 2:
+                    continue
+                try:
+                    name_index = int(row[1])
+                except ValueError:
+                    continue
+                if name_index in class_map:
+                    continue
+                class_map[name_index] = next_index
+                class_names[next_index] = row[0]
+                next_index += 1
+
+        return class_map, class_names
+
+    def _init_class_lookup(
+        self,
+        class_map: Optional[Dict[int, int]],
+        class_names: Optional[Dict[int, str]],
+    ) -> Tuple[Dict[int, int], Dict[int, str]]:
+        if class_map is not None:
+            if class_names is None:
+                class_names = {}
+            return class_map, class_names
+        return self.build_class_lookup(self.root, self.background_index)
+
+    def _discover_samples(self, sample_limit: Optional[int]) -> List[Dict[str, Path]]:
+        samples: List[Dict[str, Path]] = []
+        for img_path in sorted(self.split_dir.rglob("*.jpg")):
+            stem = img_path.stem
+            if stem.endswith("_seg"):
+                continue
+            annotation_path = img_path.with_suffix(".json")
+            segmentation_path = img_path.with_name(f"{stem}_seg.png")
+            # Skip auxiliary images inside instance folders.
+            if img_path.parent.name == stem:
+                continue
+            if not annotation_path.exists() or not segmentation_path.exists():
+                continue
+            samples.append(
+                {
+                    "image": img_path,
+                    "annotation": annotation_path,
+                    "segmentation": segmentation_path,
+                }
+            )
+            if sample_limit is not None and len(samples) >= sample_limit:
+                break
+
+        if not samples:
+            raise RuntimeError(
+                f"Found no ADE20K items in `{self.split_dir}`. Check dataset extraction."
+            )
+        return samples
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    @property
+    def num_classes(self) -> int:
+        return self._num_classes
+
+    def _load_objects(self, annotation_path: Path) -> List[Dict[str, Any]]:
+        with annotation_path.open("r", encoding="utf-8") as handle:
+            annotation = json.load(handle)["annotation"]
+        objects = annotation.get("object", [])
+        if isinstance(objects, dict):
+            objects = [objects]
+        return objects
+
+    def _build_semantic_mask(
+        self, sample: Dict[str, Path]
+    ) -> Tuple[np.ndarray, List[int]]:
+        segmentation_image = Image.open(sample["segmentation"])
+        width, height = segmentation_image.size
+        semantic_mask = np.full((height, width), self.background_index, dtype=np.int32)
+        present_classes: List[int] = []
+
+        for obj in self._load_objects(sample["annotation"]):
+            try:
+                name_index = int(obj.get("name_ndx"))
+            except (TypeError, ValueError):
+                continue
+
+            class_id = self.class_map.get(name_index)
+            if class_id is None:
+                continue
+
+            mask_rel_path = obj.get("instance_mask")
+            if not mask_rel_path:
+                continue
+            mask_path = self.split_dir / mask_rel_path
+            if not mask_path.exists():
+                continue
+
+            mask_image = Image.open(mask_path)
+            mask_array = np.array(mask_image)
+            positive = mask_array == 255
+            if not np.any(positive):
+                positive = mask_array > 0
+            if not np.any(positive):
+                continue
+
+            semantic_mask[positive] = class_id
+            present_classes.append(class_id)
+
+        return semantic_mask, present_classes
+
+    def __getitem__(self, index: int) -> Dict[str, Any]:
+        sample = self.samples[index]
+
+        image = Image.open(sample["image"]).convert("RGB")
+        semantic_mask, present_classes = self._build_semantic_mask(sample)
+
+        if self.image_transform:
+            image = self.image_transform(image)
+        else:
+            image = tv_transforms.ToTensor()(image)
+
+        mask_image = Image.fromarray(semantic_mask.astype(np.int32), mode="I")
+        if self.mask_transform:
+            mask = self.mask_transform(mask_image)
+        else:
+            mask = tvF.pil_to_tensor(mask_image).squeeze(0).long()
+
+        if isinstance(mask, torch.Tensor):
+            mask_tensor = mask.long()
+        else:
+            mask_tensor = torch.as_tensor(np.array(mask), dtype=torch.long)
+
+        return {
+            "image": image,
+            "mask": mask_tensor,
+            "meta": {
+                "image_path": str(sample["image"]),
+                "classes": sorted(set(present_classes)),
+            },
+        }
+
+
+class ADE20KDataModule(pl.LightningDataModule):
+    """Lightning DataModule wrapping :class:`ADE20KSegmentationDataset`."""
+
+    def __init__(
+        self,
+        data_dir: Union[str, Path],
+        *,
+        batch_size: int = 4,
+        eval_batch_size: Optional[int] = None,
+        num_workers: int = 4,
+        image_size: int = 224,
+        shuffle_buffer_size: Optional[int] = None,
+        max_classes: Optional[int] = None,
+        train_limit: Optional[int] = None,
+        val_limit: Optional[int] = None,
+        test_limit: Optional[int] = None,
+        pin_memory: bool = False,
+        train_image_transform: Optional[Callable[[Image.Image], Any]] = None,
+        val_image_transform: Optional[Callable[[Image.Image], Any]] = None,
+        mask_transform: Optional[Callable[[Image.Image], Any]] = None,
+    ) -> None:
+        super().__init__()
+        self.data_dir = Path(data_dir)
+        self.batch_size = batch_size
+        self.eval_batch_size = eval_batch_size if eval_batch_size is not None else batch_size
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+
+        # The datamodule loads items from disk, but we expose this attribute for API compatibility
+        # with the other dataset configs.
+        self.shuffle_buffer_size = shuffle_buffer_size
+        self.max_classes = max_classes
+        self.train_limit = train_limit
+        self.val_limit = val_limit
+        self.test_limit = test_limit
+
+        self.image_size = image_size
+
+        self.train_image_transform = train_image_transform or self._build_default_image_transform(
+            image_size, is_train=True
+        )
+        self.val_image_transform = val_image_transform or self._build_default_image_transform(
+            image_size, is_train=False
+        )
+        self.mask_transform = mask_transform or self._build_default_mask_transform(image_size)
+
+        self._class_map: Optional[Dict[int, int]] = None
+        self._class_names: Optional[Dict[int, str]] = None
+
+        self.train_dataset: Optional[ADE20KSegmentationDataset] = None
+        self.val_dataset: Optional[ADE20KSegmentationDataset] = None
+        self.test_dataset: Optional[ADE20KSegmentationDataset] = None
+
+    @staticmethod
+    def _build_default_image_transform(image_size: int, *, is_train: bool) -> tv_transforms.Compose:
+        transforms: List[Any] = []
+        if is_train:
+            transforms.append(tv_transforms.RandomHorizontalFlip())
+        transforms.extend(
+            [
+                tv_transforms.Resize((image_size, image_size), interpolation=InterpolationMode.BICUBIC),
+                tv_transforms.ToTensor(),
+                tv_transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
+        )
+        return tv_transforms.Compose(transforms)
+
+    @staticmethod
+    def _build_default_mask_transform(image_size: int) -> tv_transforms.Compose:
+        return tv_transforms.Compose(
+            [
+                tv_transforms.Resize((image_size, image_size), interpolation=InterpolationMode.NEAREST),
+                tv_transforms.Lambda(lambda img: tvF.pil_to_tensor(img).squeeze(0).long()),
+            ]
+        )
+
+    def _ensure_class_lookup(self) -> None:
+        if self._class_map is not None:
+            return
+        self._class_map, self._class_names = ADE20KSegmentationDataset.build_class_lookup(
+            self.data_dir
+        )
+        if self.max_classes is not None:
+            filtered_map: Dict[int, int] = {}
+            filtered_names: Dict[int, str] = {}
+            for name_index, class_id in self._class_map.items():
+                if class_id <= self.max_classes:
+                    filtered_map[name_index] = class_id
+                    if self._class_names and class_id in self._class_names:
+                        filtered_names[class_id] = self._class_names[class_id]
+            self._class_map = filtered_map
+            self._class_names = filtered_names
+
+    @property
+    def num_classes(self) -> int:
+        if self.train_dataset is not None:
+            return self.train_dataset.num_classes
+        if self._class_map is None:
+            self._ensure_class_lookup()
+        assert self._class_map is not None
+        return max(self._class_map.values(), default=0) + 1
+
+    def setup(self, stage: Optional[str] = None) -> None:
+        self._ensure_class_lookup()
+
+        if stage in (None, "fit"):
+            self.train_dataset = ADE20KSegmentationDataset(
+                self.data_dir,
+                split="training",
+                class_map=self._class_map,
+                class_names=self._class_names,
+                image_transform=self.train_image_transform,
+                mask_transform=self.mask_transform,
+                sample_limit=self.train_limit,
+            )
+            self.val_dataset = ADE20KSegmentationDataset(
+                self.data_dir,
+                split="validation",
+                class_map=self._class_map,
+                class_names=self._class_names,
+                image_transform=self.val_image_transform,
+                mask_transform=self.mask_transform,
+                sample_limit=self.val_limit,
+            )
+
+        if stage in (None, "validate") and self.val_dataset is None:
+            self.val_dataset = ADE20KSegmentationDataset(
+                self.data_dir,
+                split="validation",
+                class_map=self._class_map,
+                class_names=self._class_names,
+                image_transform=self.val_image_transform,
+                mask_transform=self.mask_transform,
+                sample_limit=self.val_limit,
+            )
+
+        test_dir = self.data_dir / "images" / "ADE" / "testing"
+        if test_dir.exists() and stage in (None, "test"):
+            self.test_dataset = ADE20KSegmentationDataset(
+                self.data_dir,
+                split="testing",
+                class_map=self._class_map,
+                class_names=self._class_names,
+                image_transform=self.val_image_transform,
+                mask_transform=self.mask_transform,
+                sample_limit=self.test_limit,
+            )
+
+    def train_dataloader(self) -> DataLoader:
+        if self.train_dataset is None:
+            raise RuntimeError("Call `setup('fit')` before requesting the train dataloader.")
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+        )
+
+    def val_dataloader(self) -> DataLoader:
+        if self.val_dataset is None:
+            raise RuntimeError("Call `setup('fit')` or `setup('validate')` before requesting val data.")
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.eval_batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+        )
+
+    def test_dataloader(self) -> DataLoader:
+        if self.test_dataset is None:
+            raise RuntimeError("Testing split not available or `setup('test')` not called.")
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.eval_batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+        )
 
 
 def collate_with_batch_size(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:

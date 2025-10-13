@@ -29,6 +29,7 @@ _EXTRA_CLASS_TO_MODULE_MAP = {
     "ClipImageModel": "clip",
     "ClipTextModel": "clip",
     "ClipFeatureExtractor": "clip",
+    "Dinov3SegmentorFeatureExtractor": "dinov3",
 }
 
 
@@ -50,4 +51,5 @@ __all__ = [
     "ClipImageModel",
     "ClipTextModel",
     "ClipFeatureExtractor",
+    "Dinov3SegmentorFeatureExtractor",
 ]

@@ -110,6 +110,21 @@ def evaluate(config: EvaluationConfig):
         train_config = hydra.compose(os.path.splitext(config_name)[0], overrides=overrides)
         train_config.dataset.batch_size = config.eval_batch_size
 
+        # Ensure hierarchical refinement modules are pre-initialized for strict checkpoint loading
+        try:
+            feature_dim_val = None
+            if "experiment" in train_config and "input_feature_dim" in train_config.experiment:
+                feature_dim_val = train_config.experiment.input_feature_dim
+
+            if "models" in train_config and feature_dim_val is not None:
+                if "hierarchical_refine" in train_config.models:
+                    train_config.models.hierarchical_refine.feature_dim = feature_dim_val
+                if "hierarchical_refine_l2" in train_config.models:
+                    train_config.models.hierarchical_refine_l2.feature_dim = feature_dim_val
+        except Exception:
+            # If anything goes wrong here, we fall back to default behavior.
+            pass
+
         datamodule, model = eval_utils.build_from_train_config(train_config, config.checkpoint_path)
 
     if config.modules is not None:

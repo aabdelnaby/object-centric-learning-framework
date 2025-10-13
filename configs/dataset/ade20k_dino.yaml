@@ -1,0 +1,13 @@
+_target_: ocl.datasets.ADE20KDataModule
+
+data_dir: ${oc.env:ADE20K_ROOT, ADE20K_2021_17_01}
+batch_size: 8
+eval_batch_size: 8
+num_workers: 8
+image_size: 224
+max_classes: 150
+pin_memory: true
+shuffle_buffer_size: null
+train_limit: null
+val_limit: null
+test_limit: null

@@ -1,0 +1,87 @@
+# @package _global_
+# Train feature reconstruction using DINOv3 segmentor logits on ADE20K.
+
+defaults:
+  - /experiment/projects/bridging/dinosaur/_base_feature_recon
+  - /dataset: ade20k
+  - /experiment/projects/ade20k/_preprocessing_ade20k
+  - _self_
+
+experiment:
+  input_feature_dim: 150  # ADE20K classes
+
+models:
+  feature_extractor:
+    _target_: routed.ocl.feature_extractors.Dinov3SegmentorFeatureExtractor
+    # Provide your local DINOv3 repo + checkpoint. Example:
+    # repo_dir: /path/to/dinov3
+    # hub_entry: dinov3_vitb14  # or e.g. 'dinov3_vitb14_ade20k_ms' if defined
+    # weights: /path/to/checkpoint.pth
+    repo_dir: ${oc.env:DINOV3_REPO, null}
+    hub_entry: ${oc.env:DINOV3_HUB_ENTRY, null}
+    weights: ${oc.env:DINOV3_WEIGHTS, null}
+    freeze: true
+
+  # Decoder predicts per-patch class logits, mixed by per-object masks
+  object_decoder:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: ${models.perceptual_grouping.object_dim}
+    output_dim: ${experiment.input_feature_dim}
+    num_patches: 256  # 16x16 grid for 224x224 at patch-14 stride
+    object_features_path: perceptual_grouping.objects
+    target_path: feature_extractor.features
+    image_path: input.image
+
+  # Hierarchical child level (optional)
+  hierarchical_refine:
+    _target_: routed.ocl.hierarchy.HierarchicalSlots
+    tokens_path: feature_extractor.features
+    parent_slots_path: perceptual_grouping.objects
+    parent_masks_path: object_decoder.masks
+    child_per_parent: 2
+    slot_dim: ${models.conditioning.object_dim}
+    sa_iters: 3
+    feature_dim: ${experiment.input_feature_dim}
+    use_sa_attention_for_gating: true
+  object_decoder_child:
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: ${models.perceptual_grouping.object_dim}
+    output_dim: ${experiment.input_feature_dim}
+    num_patches: 256
+    decoder:
+      _target_: ocl.neural_networks.build_mlp
+      _partial_: true
+      features: [1024, 1024, 1024]
+    object_features_path: hierarchical_refine.child_objects
+    gating_mask_path: hierarchical_refine.child_gating_masks
+    image_path: input.image
+
+losses:
+  # MSE on logits (works without adding a CE variant); targets are the DINOv3 logits features
+  mse:
+    _target_: routed.ocl.losses.ReconstructionLoss
+    loss_type: mse
+    input_path: object_decoder.reconstruction
+    target_path: object_decoder.target
+  mse_child:
+    _target_: routed.ocl.losses.ReconstructionLoss
+    loss_type: mse
+    weight: 1.0
+    input_path: object_decoder_child.reconstruction
+    target_path: object_decoder.target
+
+visualizations:
+  input:
+    _target_: routed.ocl.visualizations.Image
+    denormalization:
+      _target_: ocl.preprocessing.Denormalize
+      mean: [0.485, 0.456, 0.406]
+      std: [0.229, 0.224, 0.225]
+    image_path: input.image
+  masks:
+    _target_: routed.ocl.visualizations.Mask
+    mask_path: object_decoder.masks_as_image
+  child_masks:
+    _target_: routed.ocl.visualizations.Mask
+    mask_path: object_decoder_child.masks_as_image
+

@@ -1,22 +1,21 @@
 # @package _global_
-# ViT feature reconstruction on COCO using an autoregressive decoder (SLATE style)
+# ViT feature reconstruction on ADE20K using DINOSAUR hierarchy.
 defaults:
   - /experiment/projects/bridging/dinosaur/_base_feature_recon
-  - /dataset: coco
-  - /experiment/projects/bridging/dinosaur/_preprocessing_coco_dino_feature_recon_ccrop
-  - /experiment/projects/bridging/dinosaur/_metrics_coco
+  - /dataset: ade20k_dino
   - _self_
 
-# The following parameters assume training on 4 GPUs, leading to an effective batch size of 32.
 trainer:
   devices: 4
   max_steps: 500000
-  max_epochs:
-  gradient_clip_val: 1.0
 
 dataset:
-  num_workers: 4
-  batch_size: 16
+  batch_size: 8
+  num_workers: 8
+
+# Disable metrics that expect MOVI-style instance masks.
+training_metrics: {}
+evaluation_metrics: {}
 
 experiment:
   input_feature_dim: 384
@@ -29,28 +28,38 @@ experiment:
 models:
   conditioning:
     _target_: routed.ocl.conditioning.RandomConditioning
-    n_slots: 7
-    object_dim: 256
-
+    n_slots: 4
+    object_dim: 128
     batch_size_path: input.batch_size
   feature_extractor:
-    model_name: vit_small_patch16_224_dino
-    pretrained: ${when_testing:false,true}
+    _target_: routed.ocl.feature_extractors.TimmFeatureExtractor
+    model_name: vit_small_patch8_224_dino
+    pretrained: true
     freeze: true
+    feature_level: 12
+
+  perceptual_grouping:
+    positional_embedding:
+      _target_: ocl.neural_networks.wrappers.Sequential
+      _args_:
+        - _target_: ocl.neural_networks.positional_embedding.DummyPositionEmbed
+        - _target_: ocl.neural_networks.build_two_layer_mlp
+          input_dim: 384
+          output_dim: ${....feature_dim}
+          hidden_dim: 384
+          initial_layer_norm: true
 
   object_decoder:
-    _target_: routed.ocl.decoding.AutoregressivePatchDecoder
-    decoder_cond_dim: ${.output_dim}
-    use_input_transform: true
-    use_decoder_masks: true
+    _target_: routed.ocl.decoding.PatchDecoder
+    object_dim: ${models.perceptual_grouping.object_dim}
+    output_dim: ${experiment.input_feature_dim}
+    num_patches: 784
     decoder:
-      _target_: ocl.neural_networks.build_transformer_decoder
+      _target_: ocl.neural_networks.build_mlp
       _partial_: true
-      n_layers: 4
-      n_heads: 8
-      return_attention_weights: true
-    masks_path: perceptual_grouping.feature_attributions
+      features: [1024, 1024, 1024]
     object_features_path: perceptual_grouping.objects
+
   hierarchical_refine:
     _target_: routed.ocl.hierarchy.HierarchicalSlots
     tokens_path: feature_extractor.features
@@ -61,14 +70,14 @@ models:
     sa_iters: 3
     feature_dim: null
     use_sa_attention_for_gating: true
-    use_straight_through_gumbel: false
-    gumbel_temperature: 0.0
+    use_straight_through_gumbel: true
+    gumbel_temperature: 1.0
 
   object_decoder_child:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: ${models.perceptual_grouping.object_dim}
     output_dim: ${experiment.input_feature_dim}
-    num_patches: 196
+    num_patches: 784
     decoder:
       _target_: ocl.neural_networks.build_mlp
       _partial_: true
@@ -94,7 +103,7 @@ models:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: ${models.perceptual_grouping.object_dim}
     output_dim: ${experiment.input_feature_dim}
-    num_patches: 196
+    num_patches: 784
     decoder:
       _target_: ocl.neural_networks.build_mlp
       _partial_: true
@@ -102,6 +111,13 @@ models:
     object_features_path: hierarchical_refine_l2.child_objects
     gating_mask_path: hierarchical_refine_l2.child_gating_masks
     image_path: input.image
+
+  masks_as_image:
+    _target_: routed.ocl.utils.resizing.Resize
+    input_path: object_decoder.masks
+    size: 128
+    resize_mode: bilinear
+    patch_mode: true
 
   child_masks_as_image:
     _target_: routed.ocl.utils.resizing.Resize
@@ -117,6 +133,14 @@ models:
     resize_mode: bilinear
     patch_mode: true
 
+visualizations:
+  child_masks:
+    _target_: routed.ocl.visualizations.Mask
+    mask_path: child_masks_as_image
+  grandchild_masks:
+    _target_: routed.ocl.visualizations.Mask
+    mask_path: grandchild_masks_as_image
+
 losses:
   mse_child:
     _target_: routed.ocl.losses.ReconstructionLoss
@@ -130,11 +154,3 @@ losses:
     weight: "${eval_lambda:'lambda d, w: 0.0 if d < 3 else w', ${experiment.hierarchy.depth}, ${experiment.hierarchy.child2_loss_weight}}"
     input_path: object_decoder_grandchild.reconstruction
     target_path: object_decoder.target
-
-visualizations:
-  child_masks:
-    _target_: routed.ocl.visualizations.Mask
-    mask_path: child_masks_as_image
-  grandchild_masks:
-    _target_: routed.ocl.visualizations.Mask
-    mask_path: grandchild_masks_as_image
