@@ -1,18 +1,32 @@
 {
-  "train_config_path": "/pfs/data6/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/projects/bridging/dinosaur/coco_feat_rec_dino_small16_auto/2025-10-07_21-10-41/config/config_val_flat.yaml",
-  "checkpoint_path": "/pfs/data6/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/checkpoints/epoch_67-step_500000_coco.ckpt",
+  "train_config_path": "/pfs/data6/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/outputs/projects/bridging/dinosaur/coco_feat_rec_dino_small16_auto_dinov3/2025-11-26_04-44-34/config/config_val.yaml",
+  "checkpoint_path": "/pfs/data6/home/kn/kn_kn/kn_pop550892/desktop/object-centric-learning-framework/checkpoints/dinov3/epoch_21-step_81234_stable_2309209.ckpt",
   "metrics": {
     "train": {
-      "val/mse": 0.014755169861018658,
-      "val/mse_child": 0.0,
-      "val/mse_child2": 0.0,
-      "val/loss_total": 0.014755169861018658
+      "val/mse": 27.326690673828125,
+      "val/mse_child": 266.442138671875,
+      "val/mse_child2": 177.63499450683594,
+      "val/loss_total": 471.4039611816406,
+      "val/instance_mask_ari": 0.28894082761040835,
+      "val/instance_mask_iou": 0.21904319436158473,
+      "val/segmentation_mask_iou": 0.3068583016269298,
+      "val/instance_abo": 0.24395501719532892,
+      "val/segmentation_abo": 0.3229345040970482,
+      "val/object_recovery": 0.20840306619953627,
+      "val/instance_mask_corloc": 0.43232323232323233
     },
     "val": {
-      "mse": 0.01493680290877819,
-      "mse_child": 0.0,
-      "mse_child2": 0.0,
-      "loss_total": 0.01493680290877819
+      "mse": 28.106895446777344,
+      "mse_child": 268.4169006347656,
+      "mse_child2": 178.95159912109375,
+      "loss_total": 475.47528076171875,
+      "instance_mask_ari": 0.26293629681449093,
+      "instance_mask_iou": 0.23962354190410665,
+      "segmentation_mask_iou": 0.3266514491533788,
+      "instance_abo": 0.2651277944866738,
+      "segmentation_abo": 0.34346941604555364,
+      "object_recovery": 0.24748707679053109,
+      "instance_mask_corloc": 0.4787018255578093
     }
   }
 }

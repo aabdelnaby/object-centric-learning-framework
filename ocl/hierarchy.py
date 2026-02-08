@@ -17,12 +17,6 @@ class HierarchicalSlots(nn.Module):
     Outputs (dict):
       - child_objects: Float[B, K1*K2, D_slots]  Refined child slots
       - child_gating_masks: Float[B, K1*K2, N]   Child-specific gating masks
-
-    Notes:
-      - By default, child gating can be created from SlotAttention attention maps, which softly
-        splits the parent region across K2 children. When disabled, the parent mask is copied for
-        each child (previous behaviour).
-      - Uses a small Slot Attention loop over K2 children per parent, gated by the parent mask.
     """
 
     def __init__(
@@ -38,8 +32,11 @@ class HierarchicalSlots(nn.Module):
         res_mlp: bool = True,
         feature_dim: Optional[int] = None,
         use_sa_attention_for_gating: bool = True,
-        use_straight_through_gumbel: bool = False,
+        use_straight_through_gumbel: bool = True,
         gumbel_temperature: float = 1.0,
+        # NEW: scheduler hyperparams
+        gumbel_temperature_end: Optional[float] = 0.1,
+        gumbel_anneal_steps: int = 0,
     ):
         super().__init__()
         self.K2 = int(child_per_parent)
@@ -50,10 +47,22 @@ class HierarchicalSlots(nn.Module):
         self.kvq_dim = kvq_dim
         self.use_projection_bias = bool(use_projection_bias)
         self.use_implicit_differentiation = bool(use_implicit_differentiation)
+
         # If True, derive child gating from SA attention over tokens; else copy parent mask per child
         self.use_sa_attention_for_gating = bool(use_sa_attention_for_gating)
         self.use_straight_through_gumbel = bool(use_straight_through_gumbel)
-        self.gumbel_temperature = float(gumbel_temperature)
+
+        # --- NEW: Gumbel temperature scheduling state ---
+        self.gumbel_temperature_start = float(gumbel_temperature)
+        if gumbel_temperature_end is None:
+            gumbel_temperature_end = gumbel_temperature
+        self.gumbel_temperature_end = float(gumbel_temperature_end)
+        self.gumbel_anneal_steps = int(gumbel_anneal_steps)
+        # Current temperature used in forward
+        self.gumbel_temperature = self.gumbel_temperature_start
+        # Step counter for annealing (saved in state_dict)
+        self.register_buffer("_gumbel_step", torch.zeros((), dtype=torch.long))
+        # -------------------------------------------------
 
         # Slot-wise MLP as in SlotAttentionGrouping
         self.mlp = nn.Sequential(
@@ -80,7 +89,25 @@ class HierarchicalSlots(nn.Module):
                 use_projection_bias=self.use_projection_bias,
                 use_implicit_differentiation=self.use_implicit_differentiation,
             )
-            
+
+    # NEW: internal helper to update temperature once per forward
+    def _maybe_update_gumbel_temperature(self) -> None:
+        if (
+            self.training
+            and self.use_straight_through_gumbel
+            and self.gumbel_anneal_steps > 0
+            and self.gumbel_temperature_start != self.gumbel_temperature_end
+        ):
+            # increment step
+            self._gumbel_step += 1
+            # clamp to max steps
+            step = torch.clamp(self._gumbel_step, max=self.gumbel_anneal_steps)
+            frac = step.float() / float(self.gumbel_anneal_steps)  # in [0, 1]
+            # linear interpolation start -> end
+            self.gumbel_temperature = (
+                self.gumbel_temperature_start
+                + frac * (self.gumbel_temperature_end - self.gumbel_temperature_start)
+            )
 
     def _build_sa_if_needed(self, feature_dim: int, device: torch.device, dtype: torch.dtype):
         if self._sa is None:
@@ -100,9 +127,9 @@ class HierarchicalSlots(nn.Module):
 
     def forward(
         self,
-        tokens: torch.Tensor,  # [B, N, D_feat]
-        parent_slots: torch.Tensor,  # [B, K1, Ds]
-        parent_masks: torch.Tensor,  # [B, K1, N]
+        tokens: torch.Tensor,       # [B, N, D_feat]
+        parent_slots: torch.Tensor, # [B, K1, Ds]
+        parent_masks: torch.Tensor, # [B, K1, N]
     ) -> Dict[str, torch.Tensor]:
         B, N, Df = tokens.shape
         _, K1, Ds = parent_slots.shape
@@ -111,6 +138,9 @@ class HierarchicalSlots(nn.Module):
 
         # Ensure SlotAttention is initialized and placed on correct device/dtype
         self._build_sa_if_needed(Df, device=tokens.device, dtype=tokens.dtype)
+
+        # NEW: update Gumbel temperature according to schedule
+        self._maybe_update_gumbel_temperature()
 
         child_slots_out = []
         child_masks_out = []
@@ -123,6 +153,7 @@ class HierarchicalSlots(nn.Module):
 
             # Determine active tokens (before normalization) for small-region guard
             token_counts = (w_parent > 0.0).sum(dim=-1)  # [B]
+
             # Seed children near the parent slot
             mu = parent_slots[:, k, :]  # [B, Ds]
             eps = 0.01 * torch.randn(B, self.K2, Ds, device=tokens.device, dtype=tokens.dtype)
@@ -156,7 +187,7 @@ class HierarchicalSlots(nn.Module):
                         logits = torch.log(attn + 1e-9)
                         hard_assign = F.gumbel_softmax(
                             logits.transpose(1, 2),
-                            tau=self.gumbel_temperature,
+                            tau=self.gumbel_temperature,  # uses scheduled temperature
                             hard=True,
                             dim=-1,
                         ).transpose(1, 2)

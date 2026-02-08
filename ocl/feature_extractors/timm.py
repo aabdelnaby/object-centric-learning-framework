@@ -48,7 +48,7 @@ class _VitFeatureType(enum.Enum):
 class _VitFeatureHook:
     """Auxilliary class used to extract features from timm ViT models."""
 
-    def __init__(self, feature_type: _VitFeatureType, block: int, drop_cls_token: bool = True):
+    def __init__(self, feature_type: _VitFeatureType, block: int, drop_cls_token: bool = True, drop_register_token: bool = True):
         """Initialize VitFeatureHook.
 
         Args:
@@ -61,13 +61,14 @@ class _VitFeatureHook:
         self.feature_type = feature_type
         self.block = block
         self.drop_cls_token = drop_cls_token
+        self.drop_register_token = drop_register_token
         self.name = f"{feature_type.name.lower()}{block}"
         self.remove_handle = None  # Can be used to remove this hook from the model again
 
         self._features = None
 
     @staticmethod
-    def create_hook_from_feature_level(feature_level: Union[int, str]):
+    def create_hook_from_feature_level(feature_level: Union[int, str], drop_register_token: bool = True):
         feature_level = str(feature_level)
         prefixes = ("key", "query", "value", "block", "cls")
         for prefix in prefixes:
@@ -83,16 +84,15 @@ class _VitFeatureHook:
             except ValueError:
                 raise ValueError(f"Can not interpret feature_level '{feature_level}'.")
 
-        return _VitFeatureHook(feature_type, block)
+        return _VitFeatureHook(feature_type, block, drop_register_token=drop_register_token)
 
     def register_with(self, model):
-        supported_models = (
-            timm.models.vision_transformer.VisionTransformer,
-            timm.models.beit.Beit,
-        )
-        if not isinstance(model, supported_models):
+        # Support any ViT-like model that exposes a sequence of transformer
+        # blocks via a `blocks` attribute. This covers classic ViTs,
+        # BEiT, and newer EVA / DINOv3-style models.
+        if not hasattr(model, "blocks"):
             raise ValueError(
-                f"This hook only supports classes {', '.join(str(cl) for cl in supported_models)}."
+                f"This hook only supports models with a `blocks` attribute, got {type(model)}."
             )
 
         if self.block > len(model.blocks):
@@ -111,6 +111,11 @@ class _VitFeatureHook:
                 )
             elif isinstance(model, timm.models.beit.Beit):
                 raise ValueError(f"BEIT not supported for {self.feature_type} extraction.")
+            if not (hasattr(block, "attn") and hasattr(block.attn, "qkv")):
+                raise ValueError(
+                    f"Model of type {type(model)} does not support key/query/value feature "
+                    "extraction (missing `attn.qkv`)."
+                )
             self.remove_handle = block.attn.qkv.register_forward_hook(self)
 
         return self
@@ -131,6 +136,9 @@ class _VitFeatureHook:
             if self.drop_cls_token:
                 # First token is CLS token.
                 features = features[:, 1:]
+            # if this is a dinov3 model, we need to remove the "register" token as well
+            if self.drop_register_token:
+                features = features[:, 4:]
         elif self.feature_type in {
             _VitFeatureType.KEY,
             _VitFeatureType.QUERY,
@@ -151,6 +159,9 @@ class _VitFeatureHook:
             if self.drop_cls_token:
                 # First token is CLS token.
                 features = features[:, 1:]
+            # if this is a dinov3 model, we need to remove the "register" token as well
+            if self.drop_register_token:
+                features = features[:, 4:]
         elif self.feature_type == _VitFeatureType.CLS:
             # We ignore self.drop_cls_token in this case as it doesn't make any sense.
             features = outp[:, 0]  # Only get class token.
@@ -194,10 +205,12 @@ class TimmFeatureExtractor(ImageFeatureExtractor):
         freeze: bool = False,
         n_blocks_to_unfreeze: int = 0,
         unfreeze_attention: bool = False,
+        drop_register_token: bool = True,
     ):
         super().__init__()
 
         self.is_vit = model_name.startswith("vit") or model_name.startswith("beit")
+        self.drop_register_token = drop_register_token
 
         def feature_level_to_list(feature_level):
             if feature_level is None:
@@ -220,7 +233,7 @@ class TimmFeatureExtractor(ImageFeatureExtractor):
 
             if len(self.feature_levels) > 0 or len(self.aux_features) > 0:
                 self._feature_hooks = [
-                    _VitFeatureHook.create_hook_from_feature_level(level).register_with(model)
+                    _VitFeatureHook.create_hook_from_feature_level(level, self.drop_register_token).register_with(model)
                     for level in itertools.chain(self.feature_levels, self.aux_features)
                 ]
                 if len(self.feature_levels) > 0:
@@ -315,10 +328,13 @@ class TimmFeatureExtractor(ImageFeatureExtractor):
             if len(self.feature_levels) == 0:
                 # Remove class token when not using hooks.
                 features = features[:, 1:]
-                positions = transformer_compute_positions(features)
+                # print("features shape:", features.shape)
+                # print("removed cls and register tokens")
+                # print(features)
+                positions = transformer_compute_positions(features, image_size=images.shape[-2:])
             else:
                 features = hook_features[: len(self.feature_levels)]
-                positions = transformer_compute_positions(features[0])
+                positions = transformer_compute_positions(features[0], image_size=images.shape[-2:])
                 features = torch.cat(features, dim=-1)
 
             if len(self.aux_features) > 0:
@@ -335,7 +351,7 @@ class TimmFeatureExtractor(ImageFeatureExtractor):
         return features, positions, aux_features
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def resnet34_savi(pretrained=False, **kwargs):
     """ResNet34 as used in SAVi and SAVi++.
 
@@ -366,7 +382,7 @@ def resnet34_savi(pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def resnet50_dino(pretrained=False, **kwargs):
     kwargs["pretrained_cfg"] = resnet._cfg(
         url=(
@@ -440,7 +456,7 @@ def _create_moco_vit(variant, pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def vit_small_patch16_224_mocov3(pretrained=False, **kwargs):
     kwargs["pretrained_cfg"] = vision_transformer._cfg(
         url="https://dl.fbaipublicfiles.com/moco-v3/vit-s-300ep/vit-s-300ep.pth.tar"
@@ -460,7 +476,7 @@ def vit_small_patch16_224_mocov3(pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def vit_base_patch16_224_mocov3(pretrained=False, **kwargs):
     kwargs["pretrained_cfg"] = vision_transformer._cfg(
         url="https://dl.fbaipublicfiles.com/moco-v3/vit-b-300ep/vit-b-300ep.pth.tar"
@@ -480,7 +496,7 @@ def vit_base_patch16_224_mocov3(pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def resnet50_mocov3(pretrained=False, **kwargs):
     kwargs["pretrained_cfg"] = resnet._cfg(
         url="https://dl.fbaipublicfiles.com/moco-v3/r-50-1000ep/r-50-1000ep.pth.tar"
@@ -527,7 +543,7 @@ def _create_msn_vit(variant, pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def vit_small_patch16_224_msn(pretrained=False, **kwargs):
     kwargs["pretrained_cfg"] = vision_transformer._cfg(
         url="https://dl.fbaipublicfiles.com/msn/vits16_800ep.pth.tar"
@@ -547,7 +563,7 @@ def vit_small_patch16_224_msn(pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def vit_base_patch16_224_msn(pretrained=False, **kwargs):
     kwargs["pretrained_cfg"] = vision_transformer._cfg(
         url="https://dl.fbaipublicfiles.com/msn/vitb16_600ep.pth.tar"
@@ -567,7 +583,7 @@ def vit_base_patch16_224_msn(pretrained=False, **kwargs):
     return model
 
 
-@timm.models.registry.register_model
+@timm.models._registry.register_model
 def vit_base_patch16_224_mae(pretrained=False, **kwargs):
 
     kwargs["pretrained_cfg"] = vision_transformer._cfg(
@@ -586,5 +602,31 @@ def vit_base_patch16_224_mae(pretrained=False, **kwargs):
     )
     model = _create_vision_transformer(
         "vit_base_patch16_224_mae", pretrained=pretrained, **model_kwargs
+    )
+    return model
+
+
+@timm.models._registry.register_model
+def vit_small_patch16_dinov3_lvd1689m(pretrained: bool = False, **kwargs):
+    kwargs["pretrained_cfg"] = vision_transformer._cfg(
+        url="hf-hub:timm/vit_small_patch16_dinov3.lvd1689m",
+        hf_hub_id="timm/vit_small_patch16_dinov3.lvd1689m",
+        input_size=(3, 256, 256),
+        crop_pct=1.0,
+        interpolation="bicubic",
+    )
+    model_kwargs = dict(
+        img_size=256,
+        patch_size=16,
+        embed_dim=384,
+        depth=12,
+        num_heads=6,
+        mlp_ratio=4,
+        qkv_bias=False,
+        num_classes=0,
+        **kwargs,
+    )
+    model = _create_vision_transformer(
+        "vit_small_patch16_dinov3.lvd1689m", pretrained=pretrained, **model_kwargs
     )
     return model

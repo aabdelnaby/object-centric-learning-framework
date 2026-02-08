@@ -37,8 +37,8 @@ class Resize(nn.Module):
         Args:
             input: Tensor to resize. If `patch_mode=False`, assumed to be of shape (..., C, H, W).
                 If `patch_mode=True`, assumed to be of shape (..., C, P), where P is the number of
-                patches. Patches are assumed to be viewable as a perfect square image. If
-                `channels_last=True`, channel dimension is assumed to be the last dimension instead.
+                patches that can be arranged as a 2D grid. If `channels_last=True`, channel
+                dimension is assumed to be the last dimension instead.
             size_tensor: Tensor which size to resize to. If tensor has <=2 dimensions and the last
                 dimension of this tensor has length 2, the two entries are taken as height and width.
                 Otherwise, the size of the last two dimensions of this tensor are used as height
@@ -60,13 +60,18 @@ class Resize(nn.Module):
             if self.channels_last:
                 input = input.transpose(-2, -1)
             n_channels, n_patches = input.shape[-2:]
-            patch_size_float = math.sqrt(n_patches)
-            patch_size = int(math.sqrt(n_patches))
-            if patch_size_float != patch_size:
-                raise ValueError(
-                    f"The number of patches needs to be a perfect square, but is {n_patches}."
-                )
-            input = input.view(-1, n_channels, patch_size, patch_size)
+
+            if self.size is None and size_tensor is None:
+                aspect_ratio = None
+            else:
+                if self.size is not None:
+                    target_size = self.size
+                else:
+                    target_size = infer_size_from_tensor(size_tensor)
+                aspect_ratio = _aspect_ratio_from_size(target_size)
+
+            patch_height, patch_width = infer_patch_grid(n_patches, aspect_ratio)
+            input = input.view(-1, n_channels, patch_height, patch_width)
         else:
             if self.channels_last:
                 input = input.permute(0, 3, 1, 2)
@@ -74,13 +79,7 @@ class Resize(nn.Module):
         if self.size is None:
             if size_tensor is None:
                 raise ValueError("`size` is `None` but no `size_tensor` was passed.")
-            if size_tensor.ndim <= 2 and size_tensor.shape[-1] == 2:
-                height, width = size_tensor.unbind(-1)
-                height = torch.atleast_1d(height)[0].squeeze().detach().cpu()
-                width = torch.atleast_1d(width)[0].squeeze().detach().cpu()
-                size = (int(height), int(width))
-            else:
-                size = size_tensor.shape[-2:]
+            size = infer_size_from_tensor(size_tensor)
         else:
             size = self.size
 
@@ -96,27 +95,84 @@ class Resize(nn.Module):
         return input
 
 
+def _aspect_ratio_from_size(size: Optional[Union[int, Tuple[int, int]]]) -> Optional[float]:
+    if size is None:
+        return None
+    if isinstance(size, tuple):
+        height, width = size
+        return float(height) / float(width)
+    return 1.0
+
+
+def infer_patch_grid(
+    n_patches: int, target_aspect_ratio: Optional[float] = None
+) -> Tuple[int, int]:
+    """Infer a 2D grid (height, width) for a number of patches.
+
+    If a `target_aspect_ratio` is provided, the returned grid is chosen such that the ratio
+    `height / width` is as close as possible to this value while still multiplying to
+    `n_patches`. If no aspect ratio is provided, the grid closest to square is chosen.
+    """
+
+    patch_size_float = math.sqrt(n_patches)
+    patch_size = int(patch_size_float)
+    if patch_size_float == patch_size:
+        return patch_size, patch_size
+
+    if target_aspect_ratio is None:
+        target_aspect_ratio = 1.0
+
+    best_height = 1
+    best_width = n_patches
+    best_error = float("inf")
+
+    for height in range(1, int(math.sqrt(n_patches)) + 1):
+        if n_patches % height != 0:
+            continue
+        width = n_patches // height
+        for candidate_height, candidate_width in ((height, width), (width, height)):
+            aspect_ratio = candidate_height / candidate_width
+            error = abs(aspect_ratio - target_aspect_ratio)
+            if error < best_error:
+                best_height, best_width, best_error = (
+                    candidate_height,
+                    candidate_width,
+                    error,
+                )
+
+    return best_height, best_width
+
+
+def infer_size_from_tensor(size_tensor: torch.Tensor) -> Tuple[int, int]:
+    if size_tensor.ndim <= 2 and size_tensor.shape[-1] == 2:
+        height, width = size_tensor.unbind(-1)
+        height = torch.atleast_1d(height)[0].squeeze().detach().cpu()
+        width = torch.atleast_1d(width)[0].squeeze().detach().cpu()
+    else:
+        height = size_tensor.shape[-2]
+        width = size_tensor.shape[-1]
+    return int(height), int(width)
+
+
 def resize_patches_to_image(
     patches: torch.Tensor,
-    size: Optional[int] = None,
+    size: Optional[Union[int, Tuple[int, int]]] = None,
     scale_factor: Optional[float] = None,
     resize_mode: str = "bilinear",
 ) -> torch.Tensor:
     """Convert and resize a tensor of patches to image shape.
 
-    This method requires that the patches can be converted to a square image.
-
     Args:
         patches: Patches to be converted of shape (..., C, P), where C is the number of channels and
             P the number of patches.
-        size: Image size to resize to.
+        size: Image size to resize to. Can be an int (square) or (height, width) tuple.
         scale_factor: Scale factor by which to resize the patches. Can be specified alternatively to
             `size`.
         resize_mode: Method to resize with. Valid options are "nearest", "nearest-exact", "bilinear",
             "bicubic".
 
     Returns:
-        Tensor of shape (..., C, S, S) where S is the image size.
+        Tensor of shape (..., C, H, W) where H and W are the resized spatial dimensions.
     """
     has_size = size is None
     has_scale = scale_factor is None
@@ -125,13 +181,11 @@ def resize_patches_to_image(
 
     n_channels = patches.shape[-2]
     n_patches = patches.shape[-1]
-    patch_size_float = math.sqrt(n_patches)
-    patch_size = int(math.sqrt(n_patches))
-    if patch_size_float != patch_size:
-        raise ValueError("The number of patches needs to be a perfect square.")
+
+    patch_height, patch_width = infer_patch_grid(n_patches, _aspect_ratio_from_size(size))
 
     image = torch.nn.functional.interpolate(
-        patches.view(-1, n_channels, patch_size, patch_size),
+        patches.view(-1, n_channels, patch_height, patch_width),
         size=size,
         scale_factor=scale_factor,
         mode=resize_mode,

@@ -116,10 +116,9 @@ class PatchARIMetric(ARIMetric):
                 number of classes.
         """
         h, w = target.shape[-2:]
-        assert h == w
 
         prediction_resized = resize_patches_to_image(
-            prediction, size=h, resize_mode=self.resize_masks_mode
+            prediction, size=(h, w), resize_mode=self.resize_masks_mode
         )
 
         return super().update(prediction=prediction_resized, target=target)

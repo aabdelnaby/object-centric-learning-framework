@@ -492,7 +492,9 @@ class PatchDecoder(nn.Module):
 
         if image is not None:
             masks_as_image = resize_patches_to_image(
-                masks, size=image.shape[-1], resize_mode="bilinear"
+                masks,
+                size=(image.shape[-2], image.shape[-1]),
+                resize_mode="bilinear",
             )
         else:
             masks_as_image = None
@@ -632,18 +634,32 @@ class AutoregressivePatchDecoder(nn.Module):
             # Simple learned additive embedding as in ViT
             inputs = inputs + self.pos_embed
 
+        seq_len = inputs.shape[1]
+        if self.mask.shape[0] != seq_len:
+            mask = torch.triu(
+                torch.full((seq_len, seq_len), float("-inf"), device=inputs.device), diagonal=1
+            )
+        else:
+            mask = self.mask.to(device=inputs.device)
+
         if empty_objects is not None:
             outputs = self.decoder(
                 inputs,
                 object_features,
-                self.mask,
+                mask,
                 memory_key_padding_mask=empty_objects,
             )
         else:
-            outputs = self.decoder(inputs, object_features, self.mask)
+            outputs = self.decoder(inputs, object_features, mask)
 
         if self.use_decoder_masks:
             decoded_patches, masks = outputs
+            # Drop the beginning-of-sequence token before turning the masks into images.
+            if masks.shape[-1] != self.num_patches:
+                if self.bos_token is not None and masks.shape[-1] == self.num_patches + 1:
+                    masks = masks[..., 1:]
+                else:
+                    masks = masks[..., -self.num_patches :]
         else:
             decoded_patches = outputs
 
@@ -654,7 +670,9 @@ class AutoregressivePatchDecoder(nn.Module):
 
         if image is not None:
             masks_as_image = resize_patches_to_image(
-                masks, size=image.shape[-1], resize_mode="bilinear"
+                masks,
+                size=(image.shape[-2], image.shape[-1]),
+                resize_mode="bilinear",
             )
         else:
             masks_as_image = None

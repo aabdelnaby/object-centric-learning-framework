@@ -96,7 +96,9 @@ class ClipImageModel(ImageFeatureExtractor):
         x = model.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
         x = self.ln_post(x)
-        return x, transformer_compute_positions(x)
+        # Drop CLS token when computing spatial positions.
+        patch_tokens = x[:, 1:]
+        return x, transformer_compute_positions(patch_tokens)
 
     def _get_features_from_resnet(self, x: ocl.typing.ImageData):
         # Commands from:

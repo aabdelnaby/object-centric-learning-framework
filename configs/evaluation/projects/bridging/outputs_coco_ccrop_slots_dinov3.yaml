@@ -30,7 +30,7 @@ eval_train: true
 save_outputs: true
 skip_metrics: false
 n_samples_to_store: 500
-outputs_dirname: pretrained_dinov3_coco_results_samples
+outputs_dirname: dinov3_huge
 
 outputs_to_store:
   - perceptual_grouping.objects
@@ -51,7 +51,7 @@ modules:
     parent_masks_path: object_decoder.masks
     child_per_parent: 2
     slot_dim: 256
-    sa_iters: 6
+    sa_iters: 3
     feature_dim: null
     use_sa_attention_for_gating: true
     use_straight_through_gumbel: true
@@ -59,8 +59,8 @@ modules:
   object_decoder_child:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: 256
-    output_dim: 384
-    num_patches: 200
+    output_dim: 4096
+    num_patches: 196
     decoder:
       _target_: ocl.neural_networks.build_mlp
       _partial_: true
@@ -75,7 +75,7 @@ modules:
     parent_masks_path: object_decoder_child.masks
     child_per_parent: 2
     slot_dim: 256
-    sa_iters: 6
+    sa_iters: 3
     feature_dim: null
     use_sa_attention_for_gating: true
     use_straight_through_gumbel: true
@@ -83,8 +83,8 @@ modules:
   object_decoder_grandchild:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: 256
-    output_dim: 384
-    num_patches: 200
+    output_dim: 4096
+    num_patches: 196
     decoder:
       _target_: ocl.neural_networks.build_mlp
       _partial_: true

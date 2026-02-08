@@ -9,18 +9,18 @@ defaults:
 
 # The following parameters assume training on 4 GPUs, leading to an effective batch size of 32.
 trainer:
-  devices: 4
+  devices: 1
   max_steps: 500000
   max_epochs:
   gradient_clip_val: 1.0
 
 dataset:
-  num_workers: 8
-  batch_size: 32
+  num_workers: 4
+  batch_size: 16
 
 experiment:
   # Match DINOv3 ViT-7B patch token embedding dimension
-  input_feature_dim: 384
+  input_feature_dim: 4096
   hierarchy:
     depth: 3
     child_per_parent: 2
@@ -35,8 +35,8 @@ models:
 
     batch_size_path: input.batch_size
   feature_extractor:
-    model_name: vit_small_patch16_224_dino
-    pretrained: ${when_testing:false,true}
+    model_name: vit_7b_patch16_dinov3.lvd1689m
+    pretrained: true
     freeze: true
 
   object_decoder:
@@ -44,6 +44,7 @@ models:
     decoder_cond_dim: ${.output_dim}
     use_input_transform: true
     use_decoder_masks: true
+    resize_mode: bicubic
     decoder:
       _target_: ocl.neural_networks.build_transformer_decoder
       _partial_: true
@@ -62,14 +63,15 @@ models:
     sa_iters: 3
     feature_dim: null
     use_sa_attention_for_gating: true
-    use_straight_through_gumbel: false
-    gumbel_temperature: 0.0
+    use_straight_through_gumbel: true
+    gumbel_temperature: 1.0
 
   object_decoder_child:
     _target_: routed.ocl.decoding.PatchDecoder
     object_dim: ${models.perceptual_grouping.object_dim}
     output_dim: ${experiment.input_feature_dim}
     num_patches: 196
+    resize_mode: bicubic
     decoder:
       _target_: ocl.neural_networks.build_mlp
       _partial_: true
@@ -103,19 +105,20 @@ models:
     object_features_path: hierarchical_refine_l2.child_objects
     gating_mask_path: hierarchical_refine_l2.child_gating_masks
     image_path: input.image
+    resize_mode: bicubic
 
   child_masks_as_image:
     _target_: routed.ocl.utils.resizing.Resize
     input_path: object_decoder_child.masks
     size: 128
-    resize_mode: bilinear
+    resize_mode: bicubic
     patch_mode: true
 
   grandchild_masks_as_image:
     _target_: routed.ocl.utils.resizing.Resize
     input_path: object_decoder_grandchild.masks
     size: 128
-    resize_mode: bilinear
+    resize_mode: bicubic
     patch_mode: true
 
 losses:

@@ -12,7 +12,8 @@ from ocl.utils.resizing import Resize, resize_patches_to_image
     [
         (3, 4, 10, None, 10, False),
         (2, 4, None, 1.5, 3, False),
-        (2, 5, 10, None, None, True),  # Error: Number of patches is not squarable
+        (2, 5, 10, None, 10, False),
+        (3, 200, (10, 20), None, (10, 20), False),
         (2, 4, None, None, None, True),  # Error: None of size and scale_factor specified
         (2, 4, 8, 2, None, True),  # Error: Both of size and scale_factor specified
     ],
@@ -28,7 +29,12 @@ def test_resize_patches_to_image(
             image = resize_patches_to_image(patches, size, scale_factor)
     else:
         image = resize_patches_to_image(patches, size, scale_factor)
-        assert image.shape == (bs, n_channels, expected_size, expected_size)
+        expected_height, expected_width = (
+            (expected_size, expected_size)
+            if isinstance(expected_size, (int, float))
+            else expected_size
+        )
+        assert image.shape == (bs, n_channels, expected_height, expected_width)
 
 
 def test_tensor_to_one_hot():

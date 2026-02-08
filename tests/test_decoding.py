@@ -139,3 +139,36 @@ def test_volume_rendering(assert_tensors_equal):
         torch.cat((black_image[:, None], gray_image[:, None]), dim=1),
         torch.cat((zero_mask, one_half_mask), dim=1),
     )
+
+
+def test_autoregressive_patch_decoder_removes_bos_from_masks():
+    class DummyDecoder(torch.nn.Module):
+        def __init__(self, output_dim: int):
+            super().__init__()
+            self.output_dim = output_dim
+
+        def forward(self, inputs, memory, mask, memory_key_padding_mask=None):
+            batch, seq_len, _ = inputs.shape
+            src_len = memory.shape[1]
+            decoded = torch.zeros(batch, seq_len, self.output_dim)
+            attention = torch.rand(batch, src_len, seq_len)
+            return decoded, attention
+
+    num_patches = 4
+    decoder = decoding.AutoregressivePatchDecoder(
+        object_dim=3,
+        output_dim=2,
+        num_patches=num_patches,
+        decoder=lambda decoder_dim, _: DummyDecoder(decoder_dim),
+        use_decoder_masks=True,
+    )
+
+    batch_size = 2
+    object_features = torch.randn(batch_size, 1, 3)
+    masks = torch.ones(batch_size, 1)
+    target = torch.randn(batch_size, num_patches, 2)
+    image = torch.randn(batch_size, 3, 8, 8)
+
+    output = decoder(object_features, masks, target, image=image)
+
+    assert output.masks_as_image.shape == (batch_size, 1, 8, 8)
