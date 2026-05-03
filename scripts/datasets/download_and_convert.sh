@@ -3,7 +3,7 @@
 case $1 in
   COCO)
     echo "Downloading COCO2017 and COCO20k data to data/coco"
-    # ./download_scripts/download_coco_data.sh
+    ./download_scripts/download_coco_data.sh
 
     echo "Converting COCO2017 to webdataset stored at outputs/coco2017"
     SEED=23894734
@@ -104,8 +104,21 @@ case $1 in
     ;;
 
 
+  ade20k)
+    echo "Creating ADE20K webdataset in outputs/ade20k using TFDS"
+    # Ensure TFDS downloads into repo-local cache if not set
+    export TFDS_DATA_DIR=${TFDS_DATA_DIR:-data/tensorflow_datasets}
+    mkdir -p outputs/ade20k/train
+    # Try the TFDS spec for ADE20K; if your TFDS installs a different builder name
+    # (e.g., 'ade20k/semantic_segmentation'), adjust below accordingly.
+    python conversion_scripts/convert_tfds.py ade20k train outputs/ade20k/train
+    mkdir -p outputs/ade20k/val
+    python conversion_scripts/convert_tfds.py ade20k validation outputs/ade20k/val
+    ;;
+
+
   *)
     echo "Unknown dataset $1"
-    echo "Only COCO, clevr+cater, clevrer, voc2007, voc2012, movi_c and movi_e are supported."
+    echo "Only COCO, clevr+cater, clevrer, voc2007, voc2012, movi_c, movi_e and ade20k are supported."
     ;;
 esac

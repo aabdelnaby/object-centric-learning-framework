@@ -19,13 +19,13 @@ dataset:
   batch_size: 16
 
 experiment:
-  # Match DINOv3 ViT-7B patch token embedding dimension
-  input_feature_dim: 4096
+  # Match DINOv3 ViT-S patch token embedding dimension
+  input_feature_dim: 384
   hierarchy:
-    depth: 3
-    child_per_parent: 2
-    child_loss_weight: 0.3
-    child2_loss_weight: 0.2
+    depth: 0
+    child_per_parent: 0
+    child_loss_weight: 0.0
+    child2_loss_weight: 0.0
 
 models:
   conditioning:
@@ -35,7 +35,7 @@ models:
 
     batch_size_path: input.batch_size
   feature_extractor:
-    model_name: vit_7b_patch16_dinov3.lvd1689m
+    model_name: vit_small_patch16_dinov3.lvd1689m
     pretrained: true
     freeze: true
 

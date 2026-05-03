@@ -3,6 +3,19 @@ outputs/
 visualization_results/
 slurm_jobs_logs/
 lightning_logs/
+aaabdeln_51ba57e6.zip
+3_iters_ccrop_slots/
+3_iters_epoch_32/
+3_iters_epoch_32_with_gumbel/
+ADE20K_2021_17_01/
+dinov3_huge/
+exp_results/
+increased_iters/
+slots/
+slots_hierarchical_full/
+slots_hierarchy/
+stable_dinov3/
+
 
 # Model artifacts
 *.ckpt

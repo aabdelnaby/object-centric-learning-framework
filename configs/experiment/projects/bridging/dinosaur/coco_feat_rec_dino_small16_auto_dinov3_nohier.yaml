@@ -1,0 +1,56 @@
+# @package _global_
+# DINOSAUR with DINOv3 ViT-S/16 backbone — flat (no hierarchy).
+#
+# Identical to coco_feat_rec_dino_small16_auto_dinov3 but with all
+# hierarchical_refine / object_decoder_child / object_decoder_grandchild
+# modules, their losses, and their visualizations removed.
+# The model is: ViT-S/16 features → SlotAttention → AutoregressivePatchDecoder.
+
+defaults:
+  - /experiment/projects/bridging/dinosaur/_base_feature_recon
+  - /dataset: coco
+  - /experiment/projects/bridging/dinosaur/_preprocessing_coco_dino_feature_recon_ccrop
+  - /experiment/projects/bridging/dinosaur/_metrics_coco
+  - _self_
+
+trainer:
+  devices: 1
+  max_steps: 500000
+  max_epochs:
+  gradient_clip_val: 1.0
+
+dataset:
+  num_workers: 4
+  batch_size: 16
+
+experiment:
+  input_feature_dim: 384   # DINOv3 ViT-S embedding dim
+
+models:
+  conditioning:
+    _target_: routed.ocl.conditioning.RandomConditioning
+    n_slots: 7
+    object_dim: 256
+    batch_size_path: input.batch_size
+
+  feature_extractor:
+    model_name: vit_small_patch16_dinov3.lvd1689m
+    pretrained: true
+    freeze: true
+
+  # Replace the base PatchDecoder with an AutoregressivePatchDecoder (SLATE-style).
+  # No hierarchy modules below this point.
+  object_decoder:
+    _target_: routed.ocl.decoding.AutoregressivePatchDecoder
+    decoder_cond_dim: ${.output_dim}
+    use_input_transform: true
+    use_decoder_masks: true
+    resize_mode: bicubic
+    decoder:
+      _target_: ocl.neural_networks.build_transformer_decoder
+      _partial_: true
+      n_layers: 4
+      n_heads: 8
+      return_attention_weights: true
+    masks_path: perceptual_grouping.feature_attributions
+    object_features_path: perceptual_grouping.objects
