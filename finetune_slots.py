@@ -29,10 +29,10 @@ Usage
 
 Output
 ------
-    cub_slot_finetune/best_checkpoint.pt   <- conditioning + perceptual_grouping
+    runs/cub_slot_finetune/best_checkpoint.pt   <- conditioning + perceptual_grouping
                                               weights (pass to train.py)
-    cub_slot_finetune/metrics.csv
-    cub_slot_finetune/viz/epoch_NNNN.png   <- slot segmentation grids
+    runs/cub_slot_finetune/metrics.csv
+    runs/cub_slot_finetune/viz/epoch_NNNN.png   <- slot segmentation grids
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ CONFIG = {
     # Acts on the 14×14 patch grid before upsampling.
     "tv_weight": 0.01,
     # Logging
-    "out_dir":   "cub_slot_finetune",
+    "out_dir":   "runs/cub_slot_finetune",
     "viz_every": 5,    # produce a slot-seg grid every N epochs (also epoch 1)
     "viz_n":     8,    # number of fixed val images in each viz grid
     # Infra

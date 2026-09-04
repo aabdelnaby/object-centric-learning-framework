@@ -8,7 +8,7 @@ from pathlib import Path
 REPO = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, REPO)
 
-CKPT_PATH   = "cub_classifier_checkpoints_patch_control/patches/best_model.pt"
+CKPT_PATH   = "runs/cub_classifier_checkpoints_patch_control/patches/best_model.pt"
 DINO_CFG    = "projects/bridging/dinosaur/coco_feat_rec_dino_small16_auto_dinov3"
 DINO_CKPT   = "checkpoints/epoch_67-step_500000_coco.ckpt"
 DINO_CACHE  = "FG-datset/CUB_200_2011/dino_feat_cache.pt"

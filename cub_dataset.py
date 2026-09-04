@@ -76,6 +76,7 @@ class CUBAttributeDataset(Dataset):
         max_text_len: int = 64,
         query_filter: Optional[str] = None,
         category_filter: Optional[str] = None,
+        image_transform=None,
     ):
         """
         Args:
@@ -83,6 +84,11 @@ class CUBAttributeDataset(Dataset):
             category_filter: Case-insensitive substring match on the ``query``
                              column (e.g. ``"color"`` selects all color queries).
                              Ignored when ``query_filter`` is set.
+            image_transform: Optional callable(PIL.Image) → tensor overriding the
+                             default ccrop pipeline. Pass FT-DINOSAUR's own
+                             ``build_preprocessing`` here so slots are computed on
+                             the resolution/normalisation the model was trained
+                             with (square resize at 224, no center crop).
         """
         super().__init__()
         self.image_root  = image_root
@@ -101,14 +107,17 @@ class CUBAttributeDataset(Dataset):
         df = df[df["label"].isin(label_vocab)]
         self.df = df.reset_index(drop=True)
 
-        # Matches the ccrop preprocessing config used for coco_feat_rec_dino_base16
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.Lambda(lambda x: x.clamp(0.0, 1.0)),  # bicubic can overshoot
-            transforms.CenterCrop(224),
-            transforms.Normalize(mean=self.IMAGE_MEAN, std=self.IMAGE_STD),
-        ])
+        if image_transform is not None:
+            self.transform = image_transform
+        else:
+            # Matches the ccrop preprocessing config used for coco_feat_rec_dino_base16
+            self.transform = transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
+                transforms.Lambda(lambda x: x.clamp(0.0, 1.0)),  # bicubic can overshoot
+                transforms.CenterCrop(224),
+                transforms.Normalize(mean=self.IMAGE_MEAN, std=self.IMAGE_STD),
+            ])
 
     def __len__(self) -> int:
         return len(self.df)
@@ -169,6 +178,9 @@ class CUBCachedFeatDataset(Dataset):
         label_vocab: dict,
         query_filter: Optional[str] = None,
         category_filter: Optional[str] = None,
+        text_cache: Optional[dict] = None,
+        dino_cache: Optional[dict] = None,
+        return_spans: bool = False,
     ):
         """
         Args:
@@ -176,9 +188,14 @@ class CUBCachedFeatDataset(Dataset):
             category_filter: Case-insensitive substring match on the ``query``
                              column (e.g. ``"color"`` selects all color queries).
                              Ignored when ``query_filter`` is set.
+            return_spans:    When True, also return per-query span vectors
+                             ``(4, d_text)`` for ``pooler='hier_router'`` (needs a
+                             text cache built with ``with_spans=True`` /
+                             ``span_dataset='cub'``). See :meth:`__getitem__`.
         """
         super().__init__()
-        self.label_vocab = label_vocab
+        self.label_vocab  = label_vocab
+        self.return_spans = return_spans
 
         df = pd.read_csv(csv_path)
         df = df[(df["split"] == split) & (df["label_rank"] == 1)]
@@ -189,13 +206,35 @@ class CUBCachedFeatDataset(Dataset):
         df = df[df["label"].isin(label_vocab)]
         self.df = df.reset_index(drop=True)
 
-        dino_cache = torch.load(dino_cache_path, map_location="cpu")
+        # dino_cache may be supplied pre-built (computed in RAM at run start, no
+        # disk round-trip — see train.py --dino_in_memory); otherwise load it.
+        if dino_cache is None:
+            dino_cache = torch.load(dino_cache_path, map_location="cpu")
         self.dino_feats    = dino_cache["features"]   # dict {image_name: (200, d_vit)} with DINOv3
         self.dino_positions = dino_cache["positions"] # (200, …) with DINOv3
 
-        text_cache = torch.load(text_cache_path, map_location="cpu")
+        # text_cache may be supplied pre-built (computed in RAM at run start, no
+        # disk round-trip — see train.py --text_in_memory); otherwise load it.
+        if text_cache is None:
+            text_cache = torch.load(text_cache_path, map_location="cpu")
         self.text_hidden   = text_cache["hidden"]     # dict {query: (L, d_text)}
         self.attn_masks    = text_cache["masks"]      # dict {query: (L,)}
+
+        if return_spans:
+            if "x_vec" not in text_cache or "y_vec" not in text_cache:
+                raise ValueError(
+                    "return_spans=True but the text cache has no x_vec/y_vec. Rebuild "
+                    "it with precompute_text(..., with_spans=True, span_dataset='cub') / "
+                    "precompute_features.py --with_spans --span_dataset cub "
+                    "(needed by pooler='hier_router')."
+                )
+            # ch0 part <x>, ch1 object <y> ("bird"), ch2 "<x> of the <y>" (parent-only
+            # query), ch3 "<y> <x> <attribute>" e.g. "bird back color" (child routing +
+            # answer readout — carries the attribute). Old caches fall back gracefully.
+            self.x_vec       = text_cache["x_vec"]
+            self.y_vec       = text_cache["y_vec"]
+            self.xy_vec      = text_cache.get("xy_vec", self.y_vec)
+            self.readout_vec = text_cache.get("readout_vec", self.x_vec)
 
     def __len__(self) -> int:
         return len(self.df)
@@ -206,6 +245,12 @@ class CUBCachedFeatDataset(Dataset):
         text_hidden  = self.text_hidden[row["query"]]      # (L, d_text)
         attn_mask    = self.attn_masks[row["query"]]       # (L,)
         label_idx    = torch.tensor(self.label_vocab[row["label"]], dtype=torch.long)
+        if self.return_spans:
+            q = row["query"]
+            spans = torch.stack(
+                [self.x_vec[q], self.y_vec[q], self.xy_vec[q], self.readout_vec[q]], dim=0,
+            )                                              # (4, d_text)
+            return dino_feat, text_hidden, attn_mask, label_idx, spans
         return dino_feat, text_hidden, attn_mask, label_idx
 
 

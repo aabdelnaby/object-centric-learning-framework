@@ -7,7 +7,7 @@ as transparency (no artificial colormaps).
 
 Example:
     python visualize_mask_hierarchy.py \
-        --input_dir slots_hierarchy/train \
+        --input_dir runs/slots_hierarchy/train \
         --save_dir visualization_results/
 """
 

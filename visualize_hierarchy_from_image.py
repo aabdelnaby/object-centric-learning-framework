@@ -26,7 +26,7 @@ expects the corresponding mask files in the same directory, e.g.:
 Usage example:
 
     python visualize_hierarchy_from_image.py \
-        --image_path slots_hierarchy/train/00001.input.orig_image.npy \
+        --image_path runs/slots_hierarchy/train/00001.input.orig_image.npy \
         --save_path visualization_results/00001_tree.png
 """
 

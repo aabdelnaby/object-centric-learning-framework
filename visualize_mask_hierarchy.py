@@ -4,7 +4,7 @@ Create tree-style visualizations for hierarchical slot masks.
 
 Example:
     python visualize_mask_hierarchy.py \
-        --input_dir slots_hierarchy/train \
+        --input_dir runs/slots_hierarchy/train \
         --index 00 \
         --save_path visualization_results/demo_tree.png
 """
