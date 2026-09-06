@@ -1,111 +1,98 @@
-# Object Centric Learning Framework (OCLF)
+# Hierarchical-DINOSAUR and the HierRouter
 
-[![Linting and Testing Status](https://github.com/amazon-science/object-centric-learning-framework/actions/workflows/lint_and_test.yaml/badge.svg?branch=main)](https://github.com/amazon-science/object-centric-learning-framework/actions/workflows/lint_and_test.yaml)
-[![Docs site](https://img.shields.io/badge/docs-GitHub_Pages-blue)](https://amazon-science.github.io/object-centric-learning-framework/)
+Code for the master's thesis *Hierarchical Object-Centric Inference over Self-Supervised Visual
+Features*. It contains what is needed to reproduce the experiments reported in the thesis, and
+nothing else.
 
+**The method.** A frozen DINOv3 ViT-S/16 and a frozen DINOSAUR slot-attention module give
+object-level slots for an image. *Hierarchical-DINOSAUR* re-runs that same frozen slot attention
+*confined to one slot's patches*, which splits each object slot into part-level sub-slots: a
+depth-2 tree induced without any object or part supervision. The *HierRouter* then answers
+"What is the colour of the `<part>` of the `<object>`?" by routing the question down that tree,
+`P(j | object)` over object slots, `P(k | j, part)` within the chosen object, and an attribute head
+on the routed part slot, marginalising over all paths. Only the routing head is trained.
 
-## What is OCLF?
-OCLF (Object Centric Learning framework) is a framework designed to ease running
-experiments for object centric learning research, yet is not limited to this
-use case.  At its heart lies the idea that while code is not typically
-composable many experiments in machine learning very similar with minor changes
-and only represent minor changes.
+**The finding.** Structure does not buy accuracy over flat patch attention: the full router reaches
+0.594 on PACO part-colour questions and a single learned query over frozen patches reaches 0.593.
+The thesis also reported that the router grounds its answers far better than those flat baselines;
+a bug in the grounding evaluation, found while reorganising this code, overturns that second claim.
+Both the published and the corrected numbers are in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md),
+which starts with the erratum.
 
-One such example is multi-task training where a model might be trained to solve
-multiple tasks at the same time.  Different ablations of said model would then
-contain different model components but largely remain the same.
-
-OCLF allows for such ablations without creating duplicate code by defining
-models and experiments in configuration files and allowing their composition in
-configuration space via [hydra](https://hydra.cc/).
-
-
-## Quickstart - Development setup
-Installing OCLF requires at least python3.8. Installation can be done using
-[poetry](https://python-poetry.org/docs/#installation).  After installing
-`poetry`, check out the repo and setup a development environment:
+## Setup
 
 ```bash
-git clone https://github.com/amazon-science/object-centric-learning-framework.git
-cd object-centric-learning-framework
-poetry install
+conda env create -f environment.yml && conda activate oclf_env   # main environment
+conda env create -f environment-internvl.yml                      # only for the VLM colour fallback
+pip install -e .                                                  # the ocl package + hier_dinosaur
 ```
 
-This installs the `ocl` package and the cli scripts used for running
-experiments in a poetry managed virtual environment.
+Datasets, pretrained weights and where they go: [docs/DATA.md](docs/DATA.md). On a machine that
+already has the original research checkout, `bash tools/link_local_data.sh` links everything into
+place and `bash tools/collect_thesis_checkpoints.sh` copies the trained heads reported in the thesis
+into `checkpoints/thesis/`.
 
-Next we need to prepare a dataset.  For this follow the steps below
-to install the dependencies needed for dataset conversion and creation.
+## Running the experiments
+
+The numbered scripts in `experiments/` are the whole pipeline; each submits a SLURM job (set
+`LOCAL=1` to run in the foreground, `DRY=1` to print the command). Steps 1-4 build the inputs and
+can be skipped if you already have the checkpoint and the feature caches.
+
+| Step | Script | What it does | Cost |
+|---|---|---|---|
+| 1 | `01_train_dinosaur.sh` | pretrain the DINOSAUR slot module on COCO | ~2 days, 1 GPU |
+| 2 | `02_build_paco_dataset.sh` | PACO-LVIS questions, part masks, colour answers | ~1 h, CPU + a short GPU array |
+| 3 | `03_build_cub_dataset.sh` | CUB-200 questions | minutes, CPU |
+| 4 | `04_precompute_features.sh` | cache the frozen patch features | ~20 min, 1 GPU |
+| 5 | `05_train_paco.sh` | the five PACO models of Table 1 | 15 min each (router: longer) |
+| 6 | `06_train_cub.sh` | the CUB router | ~1 h, 1 GPU |
+| 7 | `07_eval_tables.sh` | Tables 1, 2, 3 and the CUB numbers | ~20 min, 1 GPU |
+| 8 | `08_make_figures.sh` | the thesis figures | minutes, CPU |
+
+Each step is also a plain command, for example:
 
 ```bash
-cd scripts/datasets
-poetry install
-bash download_and_convert.sh movi_c
+python -m hier_dinosaur.train --model hier_router --dataset paco --out runs/paco/hier_router
+python -m hier_dinosaur.evaluate --checkpoint runs/paco/hier_router/best_model.pt
+python -m hier_dinosaur.grounding --router_ckpt ... --patch_ckpt ... --n 800
+python -m hier_dinosaur.viz.figures --checkpoint ... --n_samples 12 --colorbar
 ```
 
-This should create a webdataset in the path `scripts/datasets/outputs/movi_c`.
+## Where things are
 
-After exposing this dataset to OCLF, a first experiment can be run:
-
-```bash
-cd ../..   # Go back to root folder
-export DATASET_PREFIX=scripts/datasets/outputs  # Expose dataset path
-poetry run ocl_train +experiment=slot_attention/movi_c # Run training exeriment
+```
+hier_dinosaur/       the method and the experiments
+  dinosaur.py        frozen DINOv3 + DINOSAUR slot attention (loading, slot extraction)
+  hierarchy.py       recursive inference: object slots → part sub-slots (thesis Algorithm 1)
+  router.py          TextProjector + HierRouter (routing, path marginalisation, Algorithm 2)
+  baselines.py       the flat patch controls (Patch-QDot, Patch-QCA)
+  text.py            question parsing + frozen T5 span encoding
+  features.py        image preprocessing + the patch-feature cache
+  data.py            question CSVs, label vocabularies, cached-feature dataset
+  models.py          the five models, run configs, checkpoint I/O
+  train.py           training loop
+  evaluate.py        Tables 1 and 3, CUB per-part accuracy
+  grounding.py       Table 2
+  viz/               routing traces, thesis figures, the tree figure
+data_prep/           building the two question sets from the raw annotations
+experiments/         the numbered pipeline above
+ocl/, routed/, configs/   the upstream object-centric-learning-framework, used only for step 1
+                          and for loading the pretrained slot module (Apache-2.0, see NOTICE)
+tests/               unit tests + the equivalence check against the original thesis code
 ```
 
-The output of the training run should be stored at `outputs/slot_attention/movi_c/<timestamp>`.
+Not in this branch: the exploratory work that did not enter the thesis (ADE20K, Super-CLEVR-3D,
+scene out-of-distribution splits, alternative router readouts, VLM baselines, hyper-parameter
+search). It remains on the `main` branch of this repository.
 
-For a more detailed guide on how to install, setup, and use OCLF check out
-the Tutorial in the docs.
+## Provenance
 
+This branch is a reorganisation of the research code, not a rewrite: `tests/equivalence_legacy_vs_new.py`
+checks it against the original implementation on all six trained checkpoints and they agree
+bit-for-bit, from the loaded weights through the routing trace to the answer log-probabilities.
+One genuine bug found during the reorganisation is documented in the erratum at the end of
+[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
-## Citation
-If you use OCLF to run experiments in your work please cite it using the bibtex entry below
-
-```bibtex
-@misc{oclf,
-  author = {Max Horn and Maximilian Seitzer and Andrii Zadaianchuk and Zixu Zhao and Dominik Zietlow and Florian Wenzel and Tianjun Xiao},
-  title = {Object Centric Learning Framework (version 0.1)},
-  year  = {2023},
-  url   = {https://github.com/amazon-science/object-centric-learning-framework},
-}
-```
-
-## Publications
-Experiments for the following publications where run using OCLF. Please feel
-free to add your own experiments via pull requests and to list them below.
-
- * M.Seitzer et al., Bridging the Gap to Real-World Object-Centric Learning
-   [![arXiv](https://img.shields.io/badge/arXiv-2209.14860-b31b1b.svg)](https://arxiv.org/abs/2209.14860)
-   [training configurations](https://amazon-science.github.io/object-centric-learning-framework/configs/experiment/projects/bridging/)
-   [evaluation configurations](https://amazon-science.github.io/object-centric-learning-framework/configs/evaluation/projects/bridging/)
-
-
-## License
-This project is licensed under the Apache-2.0 License.
-
-
-## Contributing
-We are happy to accept code contributions in the form of pull-requests and
-kindly ask contributors to follow the guidance provided below and in
-`CONTRIBUTING.md`.
-
-We are using `pre-commit` to manage automatic code formatting and linting. For
-someone who has never worked with pre-commit, this can be a bit unusual.
-`pre-commit` works by setting up a Git commit hook that runs before each `git
-commit`. The hook executes a set of tests and automatic formatting *on all
-files that are modified by the commit*:
-- If a file does not pass a test, the commit is aborted and you are required to
-  fix the problems, `git add` the files and run `git commit` again.
-- If a file is automatically formatted, the commit is also aborted. You can
-  review the proposed changes using `git diff`, accept them with `git add` and
-  run `git commit` again.
-
-It can also make sense to manually run the hooks on all files in the repository
-(using `pre-commit run -a`) *before committing*, to make sure the commit
-passes. Note that this does not run the hooks on files which are not yet
-commited to the repository.
-
-Important: make sure to run `pre-commit` within the environment installed by
-`poetry`. Otherwise the checks might fail because the tools are not installed,
-or use different versions from the ones specified in `poetry.lock`.
+`ocl/`, `routed/`, `configs/` and `scripts/datasets/` are the upstream
+[object-centric-learning-framework](https://github.com/amazon-science/object-centric-learning-framework)
+(Apache-2.0), pruned to what this thesis uses and extended with DINOv3 support.

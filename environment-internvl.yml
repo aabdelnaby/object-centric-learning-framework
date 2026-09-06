@@ -1,0 +1,20 @@
+# Environment for the InternVL-3 colour fallback in step 2 only (data_prep/paco/annotate_colors_internvl.py).
+# Kept separate because it needs a newer torch than the main environment; numpy must stay below 2.
+#
+#   conda env create -f environment-internvl.yml
+name: internvl_env
+channels: [pytorch, nvidia, conda-forge, defaults]
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - torch==2.1.2
+      - torchvision==0.16.2
+      - transformers==4.46.3
+      - accelerate==1.0.1
+      - sentencepiece==0.2.0
+      - timm==1.0.22
+      - einops==0.8.0
+      - numpy==1.26.4
+      - pandas==2.2.3
+      - pillow==10.4.0
