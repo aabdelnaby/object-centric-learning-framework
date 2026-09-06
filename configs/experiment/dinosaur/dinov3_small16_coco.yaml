@@ -1,16 +1,21 @@
 # @package _global_
-# DINOSAUR with DINOv3 ViT-S/16 backbone — flat (no hierarchy).
+# DINOSAUR with a frozen DINOv3 ViT-S/16 backbone, trained for feature reconstruction on COCO.
 #
-# Identical to coco_feat_rec_dino_small16_auto_dinov3 but with all
-# hierarchical_refine / object_decoder_child / object_decoder_grandchild
-# modules, their losses, and their visualizations removed.
-# The model is: ViT-S/16 features → SlotAttention → AutoregressivePatchDecoder.
+# Frozen ViT-S/16 patch features (CLS + 4 register tokens dropped → 196 tokens) →
+# RandomConditioning (n_slots, learned mean/std) → SlotAttention → AutoregressivePatchDecoder.
+# This is the slot module every downstream thesis experiment uses frozen. The 11-slot run
+# (models.conditioning.n_slots=11) produced checkpoints/dinosaur_dinov3_vits16_coco.ckpt;
+# because the conditioning parameters are slot-count independent, the same weights are
+# instantiated with 9 (PACO) or 7 (CUB) slots downstream.
+#
+#   experiments/01_train_dinosaur.sh
+#   python -m ocl.cli.train +experiment=dinosaur/dinov3_small16_coco models.conditioning.n_slots=11
 
 defaults:
-  - /experiment/projects/bridging/dinosaur/_base_feature_recon
+  - /experiment/dinosaur/_base_feature_recon
   - /dataset: coco
-  - /experiment/projects/bridging/dinosaur/_preprocessing_coco_dino_feature_recon_ccrop
-  - /experiment/projects/bridging/dinosaur/_metrics_coco
+  - /experiment/dinosaur/_preprocessing_coco_ccrop
+  - /experiment/dinosaur/_metrics_coco
   - _self_
 
 trainer:
