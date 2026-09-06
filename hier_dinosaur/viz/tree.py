@@ -44,11 +44,19 @@ def compute_tree(image_path, dinosaur_ckpt, n_slots, n_children, seed, device):
     return denorm(img_t[0]), tree
 
 
-def draw_tree(img_vis, tree, out_path, img_size=224, min_mass=0.02, node_in=1.6, title=None):
+def draw_tree(img_vis, tree, out_path, img_size=224, top_objects=0, node_in=1.6, title=None):
+    """Draw input → object slots → part sub-slots.
+
+    ``top_objects`` keeps only that many object slots, the ones explaining most of the image;
+    0 keeps every non-empty slot. A handful of objects reads far better at print size.
+    """
     parent_masks = tree.parent_masks[0].cpu()            # (P, N)
     child_attn = tree.child_attn[0].cpu()                # (P, K, N)
     nonempty = tree.nonempty[0].cpu().numpy()
     keep = [j for j in range(parent_masks.shape[0]) if nonempty[j]]
+    if top_objects:
+        mass = parent_masks.sum(dim=-1).numpy()
+        keep = sorted(sorted(keep, key=lambda j: -mass[j])[:top_objects])
     n_children = child_attn.shape[1]
     n_leaves = len(keep) * n_children
     width = max(n_leaves, len(keep), 1) * node_in
@@ -90,6 +98,8 @@ def main():
     ap.add_argument("--out", default="figures/hier_dinosaur_tree.png")
     ap.add_argument("--n_slots", type=int, default=7, help="object slots M")
     ap.add_argument("--children", type=int, default=3, help="part sub-slots K per object slot")
+    ap.add_argument("--top_objects", type=int, default=3,
+                    help="draw only the N object slots covering most of the image (0 = all non-empty)")
     ap.add_argument("--dinosaur_ckpt", default=None, help=f"default: {DEFAULT_DINOSAUR_CKPT}")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--device", default="cpu")
@@ -97,8 +107,9 @@ def main():
     args = ap.parse_args()
     img_vis, tree = compute_tree(args.image, args.dinosaur_ckpt, args.n_slots, args.children, args.seed,
                                  torch.device(args.device))
-    draw_tree(img_vis, tree, args.out, title=args.title)
-    print(f"→ {args.out}  (objects kept: {int(tree.nonempty.sum())}/{tree.parent_masks.shape[1]}, K={args.children})")
+    draw_tree(img_vis, tree, args.out, top_objects=args.top_objects, title=args.title)
+    kept = min(args.top_objects, int(tree.nonempty.sum())) if args.top_objects else int(tree.nonempty.sum())
+    print(f"→ {args.out}  ({kept} of {tree.parent_masks.shape[1]} object slots drawn, K={args.children})")
 
 
 if __name__ == "__main__":

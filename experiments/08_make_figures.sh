@@ -20,8 +20,8 @@ source "$(dirname "$0")/common.sh"
 FIGURES=${FIGURES:-$ROOT/figures}
 STAGE=${STAGE:-all}
 POOL=${POOL:-200}
-PACO_ROWS=${PACO_ROWS:-"0:146,0:10,0:114,0:140,0:197,0:196"}
-CUB_ROWS=${CUB_ROWS:-"1:4,1:6;3:1,3:9;5:4,5:9"}
+PACO_ROWS=${PACO_ROWS:-"0:146,10,114,140,197,196"}
+CUB_ROWS=${CUB_ROWS:-"1:4,6;3:1,9;5:4,9"}
 TREE_IMAGE=${TREE_IMAGE:-$ROOT/data/coco/val2017/000000039769.jpg}
 paco=$CKPT_DIR/paco_hier_router/best_model.pt
 cub=$CKPT_DIR/cub_hier_router/best_model.pt

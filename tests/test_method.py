@@ -262,3 +262,14 @@ def test_label_vocab_and_split_use_rank_one_training_rows():
     assert vocab == {"blue": 0, "red": 1}    # sorted, "green" only appears at rank 2
     val = split_frame(df, "val", vocab)
     assert len(val) == 1 and val.iloc[0]["label"] == "red"
+
+
+# ── figure row selection ──────────────────────────────────────────────────────
+
+def test_select_accepts_a_seed_followed_by_rows():
+    from hier_dinosaur.viz.figures import parse_select
+    assert parse_select("0:146,10,114") == [(0, 146), (0, 10), (0, 114)]
+    assert parse_select("1:4,6;3:1,9") == [(1, 4), (1, 6), (3, 1), (3, 9)]
+    assert parse_select("0:12,0:30") == [(0, 12), (0, 30)]        # every row repeating its seed
+    with pytest.raises(ValueError):
+        parse_select("12,30")                                      # no seed

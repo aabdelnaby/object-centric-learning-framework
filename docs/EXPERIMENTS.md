@@ -143,7 +143,7 @@ bash experiments/08_make_figures.sh
 | CUB localisation | the same with the CUB checkpoint | |
 
 The localisation figures are hand-picked: generate a pool (`--n_samples 200 --page_rows 20`), read
-the contact sheets, then pass the row indices to `--select`. The thesis rows only come back with
+the contact sheets, then pass the row indices to `--select` (`"0:146,10,114"`, or `"1:4,6;3:1,9"` to mix seeds). The thesis rows only come back with
 the thesis checkpoints and the same seeds; with your own runs, pick new ones.
 
 The tree figure in the thesis was rendered from an older mask dump produced by an earlier,
@@ -202,13 +202,22 @@ within 0.002.
 always maps attention back to the true 14×14 grid. Thesis checkpoints keep loading and keep
 reproducing their published accuracies, because `normalize_config` restores the old strip for them.
 
-Retrained with the fix (`bash experiments/05_train_paco.sh patch_qdot_raw patch_qdot_projected`,
-then `CKPT_DIR=$PWD/runs bash experiments/07_eval_tables.sh`):
+**Retrained with the fix.** `bash experiments/05_train_paco.sh patch_qdot_raw patch_qdot_projected`,
+then evaluate with `CKPT_DIR=$PWD/runs bash experiments/07_eval_tables.sh`. Seeing all 196 patches
+helps both models, and the projected one then overtakes the router:
 
-| Model | thesis top-1 | retrained top-1 |
-|---|:-:|:-:|
-| Patch-QDot (raw) | 0.578 | _see results/_ |
-| Patch-QDot (projected) | 0.593 | _see results/_ |
+| Model | thesis top-1 | retrained top-1 | top-2 | top-3 |
+|---|:-:|:-:|:-:|:-:|
+| Patch-QDot (raw) | 0.578 | 0.587 | 0.751 | 0.838 |
+| Patch-QDot (projected) | 0.593 | **0.606** | 0.785 | 0.874 |
+| HierRouter (full), for comparison | 0.594 | — | — | — |
+
+Their grounding, retrained and correctly evaluated, is unchanged in kind: mass-in-mask 0.258
+(projected) and 0.242 (raw) against the router's 0.167. So the reversal is not an artefact of the
+handicapped checkpoints; it holds for models trained with the fix as well.
+
+Both peaked at epoch 16-17 of a 200-epoch run and then overfit, the same dynamics the thesis
+describes for every model.
 
 ## Verifying the refactor
 

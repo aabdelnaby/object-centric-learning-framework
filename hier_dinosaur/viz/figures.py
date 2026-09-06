@@ -5,7 +5,7 @@
         --n_samples 200 --seed 0 --page_rows 20 --colorbar --out_dir figures/paco_candidates --prefix paco
 
     # the final grid from chosen (seed, index) pairs of such pools
-    python -m hier_dinosaur.viz.figures --checkpoint ... --n_samples 200 --select "0:146,0:10,0:114" --colorbar \\
+    python -m hier_dinosaur.viz.figures --checkpoint ... --n_samples 200 --select "0:146,10,114" --colorbar \\
         --out_dir figures --prefix paco_localization_extra
 
 Row titles report the question, the prediction and the ground truth; the object slot is tinted
@@ -62,6 +62,28 @@ def sample_rows(df, dataset, n, seed):
     per_q = max(1, n // max(len(queries), 1))
     rows = [df[df["query"] == q].sample(n=min(per_q, (df["query"] == q).sum()), random_state=rng) for q in queries]
     return pd.concat(rows).sample(frac=1.0, random_state=rng).head(n).reset_index(drop=True)
+
+
+def parse_select(spec: str):
+    """Parse a row selection into (seed, index) pairs.
+
+    Accepts a seed followed by its rows, "0:12,30,7", several such groups separated by ";",
+    and the redundant form "0:12,0:30" where every row repeats its seed.
+    """
+    pairs, seed = [], None
+    for token in spec.replace(";", ",").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if ":" in token:
+            head, token = token.split(":", 1)
+            seed = int(head)
+        if seed is None:
+            raise ValueError(f"--select must start with a seed, e.g. '0:12,30'; got {spec!r}")
+        pairs.append((seed, int(token)))
+    if not pairs:
+        raise ValueError(f"--select selected no rows: {spec!r}")
+    return pairs
 
 
 @torch.no_grad()
@@ -134,7 +156,8 @@ def main():
     ap.add_argument("--prefix", default="fig")
     ap.add_argument("--rows", default=None, help="comma-separated indices → tight final grid")
     ap.add_argument("--page_rows", type=int, default=0, help="split the contact sheet into pages of N rows")
-    ap.add_argument("--select", default=None, help='"seed:idx,idx;seed:idx" → one grid across seeds')
+    ap.add_argument("--select", default=None,
+                    help='rows for one grid, e.g. "0:12,30,7" or "1:4,6;3:1,9" to mix seeds')
     ap.add_argument("--colorbar", action="store_true", help="add the P(answer) column")
     args = ap.parse_args()
 
@@ -157,11 +180,7 @@ def main():
     df_full = df_full[df_full["split"] == split]
 
     if args.select:
-        pairs = []
-        for grp in args.select.split(";"):
-            if grp.strip():
-                sd, idxs = grp.split(":")
-                pairs += [(int(sd), int(ix)) for ix in idxs.split(",")]
+        pairs = parse_select(args.select)
         pools, chosen = {}, []
         for sd, ix in pairs:
             if sd not in pools:
