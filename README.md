@@ -84,10 +84,6 @@ search). It remains on the `main` branch of this repository.
 
 ## Provenance
 
-This branch is a reorganisation of the research code, not a rewrite: `tests/equivalence_legacy_vs_new.py`
-checks it against the original implementation on all six trained checkpoints and they agree
-bit-for-bit, from the loaded weights through the routing trace to the answer log-probabilities.
-
 `ocl/`, `routed/`, `configs/` and `scripts/datasets/` are the upstream
 [object-centric-learning-framework](https://github.com/amazon-science/object-centric-learning-framework)
 (Apache-2.0), pruned to what this thesis uses and extended with DINOv3 support.
