@@ -184,7 +184,7 @@ def test_patch_qdot_head(project):
 
 
 def test_patch_qdot_legacy_offset_drops_leading_tokens():
-    """The thesis Patch-QDot runs attended over 192 of 196 patches; see the erratum in docs."""
+    """The thesis Patch-QDot runs attended over 192 of the 196 patches."""
     head = PatchQueryDotProductColorHead(D_SLOT, D_VIT, D_SLOT, C, legacy_strip_tokens=4)
     _, attn = head(torch.randn(2, 196, D_VIT), torch.randn(2, D_SLOT))
     assert attn.shape == (2, 192)

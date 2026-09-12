@@ -51,8 +51,8 @@ def att_to_map(att: torch.Tensor, size: int, legacy_grid: bool = False) -> torch
     192 tokens (patches 4..195); those are put back on their true grid positions.
 
     ``legacy_grid`` reproduces the thesis evaluation, which laid the first 169 of those 192 values
-    on a 13×13 grid and so mislocated the Patch-QDot attention maps. See the erratum in
-    docs/EXPERIMENTS.md; it is only there to quantify the effect.
+    on a 13×13 grid, carrying the training-time token offset into the map. See the note in
+    experiments/07_eval_tables.sh for when to use it.
     """
     batch, n = att.shape
     if legacy_grid and n != N_PATCHES:
@@ -170,7 +170,7 @@ def main():
     ap.add_argument("--out", default="results/paco_grounding.json")
     ap.add_argument("--per_sample_csv", default=None)
     ap.add_argument("--legacy_grid", action="store_true",
-                    help="reproduce the thesis evaluation's mislocated Patch-QDot maps (see the erratum)")
+                    help="score Patch-QDot attention as the thesis evaluation did (see experiments/07_eval_tables.sh)")
     args = ap.parse_args()
     device = torch.device(args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
 

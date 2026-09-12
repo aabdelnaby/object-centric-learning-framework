@@ -7,6 +7,13 @@
 #   patch_qdot_raw            flat control, raw patches            Table 1 row 3, Table 2
 #   patch_qca                 flat control, cross-attention        Table 1 row 4
 #
+# Note for the two Patch-QDot models: the thesis runs dropped the first four patch tokens, having
+# assumed the feature cache still held DINOv3's register tokens, which it does not. Runs from this
+# branch use all 196 patches, so they land slightly above the published numbers (raw 0.587 vs 0.578,
+# projected 0.606 vs 0.593) and their attention maps sit on the true grid. Thesis checkpoints still
+# load and still reproduce their published numbers; see experiments/07_eval_tables.sh for how this
+# affects grounding.
+#
 # Every model trains only its head on the cached features: AdamW 2e-4, weight decay 0.02,
 # 10k warm-up steps then cosine, batch 128, NLL. All of them overfit within the budget, so the
 # best-validation checkpoint is what gets reported. The patch models converge in about 15 minutes;

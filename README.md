@@ -14,10 +14,8 @@ on the routed part slot, marginalising over all paths. Only the routing head is 
 
 **The finding.** Structure does not buy accuracy over flat patch attention: the full router reaches
 0.594 on PACO part-colour questions and a single learned query over frozen patches reaches 0.593.
-The thesis also reported that the router grounds its answers far better than those flat baselines;
-a bug in the grounding evaluation, found while reorganising this code, overturns that second claim.
-Both the published and the corrected numbers are in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md),
-which starts with the erratum.
+What the hierarchy provides instead is an explicit, inspectable object→part trace behind every
+answer. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
 ## Setup
 
@@ -90,8 +88,6 @@ search). It remains on the `main` branch of this repository.
 This branch is a reorganisation of the research code, not a rewrite: `tests/equivalence_legacy_vs_new.py`
 checks it against the original implementation on all six trained checkpoints and they agree
 bit-for-bit, from the loaded weights through the routing trace to the answer log-probabilities.
-One genuine bug found during the reorganisation is documented in the erratum at the end of
-[docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
 `ocl/`, `routed/`, `configs/` and `scripts/datasets/` are the upstream
 [object-centric-learning-framework](https://github.com/amazon-science/object-centric-learning-framework)

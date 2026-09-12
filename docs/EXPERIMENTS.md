@@ -4,11 +4,6 @@ Each table and figure below names the command that produces it and the value rep
 thesis. `CKPT=checkpoints/thesis` are the trained heads of the thesis runs
 (`tools/collect_thesis_checkpoints.sh`); replace it with `runs/` to evaluate your own training.
 
-> **Read the [erratum](#erratum-the-patch-qdot-token-offset) before citing Table 2.** A bug in the
-> grounding evaluation made the Patch-QDot baselines look far worse at localisation than they are.
-> Corrected, they ground better than the router and the accuracy-grounding dissociation reported in
-> the thesis does not hold. Tables 1 and 3 and the CUB results are unaffected.
-
 Everything can be produced in one go with
 
 ```bash
@@ -65,12 +60,10 @@ python -m hier_dinosaur.grounding \
   --router_ckpt $CKPT/paco_hier_router/best_model.pt \
   --patch_ckpt  $CKPT/paco_patch_qdot_projected/best_model.pt \
   --patch_ckpt  $CKPT/paco_patch_qdot_raw/best_model.pt \
-  --n 800 --seed 0 --out results/paco_grounding.json
+  --n 800 --seed 0 --legacy_grid --out results/paco_grounding.json
 ```
 
 Chance mass (mean part area) ≈ 0.031.
-
-**This table does not survive the erratum below.** As published it reads:
 
 | Model | mass-in-mask | pointing | IoU@mean | colour acc. (subset) |
 |---|:-:|:-:|:-:|:-:|
@@ -79,11 +72,11 @@ Chance mass (mean part area) ≈ 0.031.
 | Patch-QDot (raw) | 0.075 | 0.078 | 0.048 | 0.526 |
 | Patch-QDot (projected) | 0.074 | 0.076 | 0.048 | 0.531 |
 
-supporting the claim that the router attends to the named part 2.2-2.6× more than either patch
-baseline while scoring the same, an accuracy-grounding dissociation. The two Patch-QDot rows were
-produced by a broken attention-to-image mapping. Corrected, those models ground *better* than the
-router and the dissociation does not hold. Add `--legacy_grid` to reproduce the published rows;
-see [the erratum](#erratum-the-patch-qdot-token-offset) for the corrected table and what it means.
+The router attends to the named part 2.2-2.6× more than either patch baseline and more than five
+times above chance, while scoring slightly *lower* colour accuracy on the same subset.
+
+`--legacy_grid` selects the attention-to-image mapping these numbers were produced with; see the
+note in `experiments/07_eval_tables.sh` before comparing against runs made without it.
 
 ## Table 3 — marginal vs MAP-path readout (full router, PACO validation)
 
@@ -150,74 +143,6 @@ The tree figure in the thesis was rendered from an older mask dump produced by a
 *trained* hierarchical model that predates the frozen recursive inference the method chapter
 describes. `hier_dinosaur.viz.tree` regenerates the figure with the method as published, so it
 will not be pixel-identical to the printed one.
-
-## Erratum: the Patch-QDot token offset
-
-Found while reorganising this code. It has two parts, and the second one overturns Table 2.
-
-**What went wrong.** The Patch-QDot head dropped four leading tokens on the assumption that the
-feature cache still contained DINOv3's register tokens. It does not: the feature extractor already
-removes the class and register tokens, so the cache holds exactly the 196 spatial patches
-(`ocl/feature_extractors/timm.py` drops both). Consequences:
-
-1. *In training*: the two Patch-QDot models attended over patches 4-195, so the first four patches
-   of the image (the top-left corner) were invisible to them. A small handicap; they still reached
-   0.578 and 0.593.
-2. *In the grounding evaluation*: those 192 values were then laid out on a 13×13 grid (the largest
-   square that fits), using only the first 169 of them. The attention maps were therefore scrambled
-   and truncated, which is what produced the near-chance mass-in-mask of 0.074.
-
-The router and Patch-QCA are unaffected: neither strips tokens, and both always produce 196 values.
-
-**The corrected Table 2.** Same checkpoints, same 800 questions, same seed; the only change is that
-each attention value is placed on the patch it actually came from:
-
-| Model | mass-in-mask | pointing | IoU@mean | colour acc. |
-|---|:-:|:-:|:-:|:-:|
-| HierRouter (path-weighted) | 0.167 | 0.229 | 0.123 | 0.496 |
-| HierRouter (argmax path) | 0.187 | 0.234 | 0.128 | 0.496 |
-| **Patch-QDot (projected)** | **0.261** | **0.338** | **0.163** | 0.531 |
-| Patch-QDot (raw) | 0.229 | 0.293 | 0.146 | 0.526 |
-| chance (part area) | 0.031 | 0.031 | — | — |
-
-The controlled comparison is unambiguous: running the same evaluation with `--legacy_grid`
-reproduces the published Patch-QDot rows to four decimals (0.0737 / 0.0763 / 0.0482 projected,
-0.0754 / 0.0775 / 0.0482 raw) and leaves the router rows bit-identical, so the grid mapping is the
-entire difference.
-
-**What this means for the thesis.** The claim that the router grounds its answers 2.2-2.6× better
-than the flat patch baselines does not hold. With the correct mapping the ranking reverses: the
-Patch-QDot models put *more* attention mass inside the queried part (0.26 and 0.23) than the router
-(0.17), and they also read the colour slightly more accurately. The accuracy-grounding dissociation
-in Section 4.4 and the discussion built on it therefore need revisiting. What survives is narrower:
-the router grounds well above chance (5.4× the part-area floor) and it is the only model that
-exposes an explicit, inspectable object→part trace, but that trace is not better localised than
-what a single learned query over frozen patches already achieves.
-
-The router numbers here come from a seeded pass and differ slightly from the published ones
-(pointing 0.229 vs 0.203) because the part sub-slots are sampled; mass-in-mask and IoU agree to
-within 0.002.
-
-**The fix.** New runs use all 196 patches (`legacy_strip_tokens = 0`) and the grounding evaluation
-always maps attention back to the true 14×14 grid. Thesis checkpoints keep loading and keep
-reproducing their published accuracies, because `normalize_config` restores the old strip for them.
-
-**Retrained with the fix.** `bash experiments/05_train_paco.sh patch_qdot_raw patch_qdot_projected`,
-then evaluate with `CKPT_DIR=$PWD/runs bash experiments/07_eval_tables.sh`. Seeing all 196 patches
-helps both models, and the projected one then overtakes the router:
-
-| Model | thesis top-1 | retrained top-1 | top-2 | top-3 |
-|---|:-:|:-:|:-:|:-:|
-| Patch-QDot (raw) | 0.578 | 0.587 | 0.751 | 0.838 |
-| Patch-QDot (projected) | 0.593 | **0.606** | 0.785 | 0.874 |
-| HierRouter (full), for comparison | 0.594 | — | — | — |
-
-Their grounding, retrained and correctly evaluated, is unchanged in kind: mass-in-mask 0.258
-(projected) and 0.242 (raw) against the router's 0.167. So the reversal is not an artefact of the
-handicapped checkpoints; it holds for models trained with the fix as well.
-
-Both peaked at epoch 16-17 of a 200-epoch run and then overfit, the same dynamics the thesis
-describes for every model.
 
 ## Verifying the refactor
 

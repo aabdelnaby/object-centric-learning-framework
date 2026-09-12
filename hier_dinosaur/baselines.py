@@ -24,10 +24,10 @@ class PatchQueryDotProductColorHead(nn.Module):
         d_slot:               projection target when ``project_patches`` is on.
         project_patches:      ``False`` = raw variant (dot product in the 384-d ViT space),
                               ``True`` = projected variant (one learned linear map to d_slot first).
-        legacy_strip_tokens:  drop this many leading tokens before attending. The thesis runs used 4
-                              (a left-over register-token strip although the caches already had the
-                              registers removed, so they attended over 192 of the 196 patches). Keep 0
-                              for new runs; ``normalize_config`` sets 4 when loading a thesis checkpoint.
+        legacy_strip_tokens:  drop this many leading tokens before attending. The thesis runs used 4,
+                              a register-token strip the feature cache had already applied, so they
+                              attended over 192 of the 196 patches. Keep 0 for new runs;
+                              ``normalize_config`` sets 4 when loading a thesis checkpoint.
     """
 
     def __init__(

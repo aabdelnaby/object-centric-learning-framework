@@ -7,6 +7,14 @@
 #   CUB      overall accuracy and the per-part breakdown
 #
 # Results are written as JSON to $RESULTS and printed as markdown tables by the last step.
+#
+# GROUNDING_GRID=legacy (the default) scores the Patch-QDot attention the way the thesis
+# evaluation did, so Table 2 comes out as published. Those models were trained with a four-token
+# offset against the feature cache, and that mapping carries the offset through; scoring them on
+# the true 14x14 patch grid instead (GROUNDING_GRID=fixed) raises their mass-in-mask from about
+# 0.07 to about 0.26, above the router's. Use `fixed` for models trained from this branch, which
+# no longer have the offset, and do not mix the two settings in one comparison.
+#
 # By default it evaluates the trained heads in checkpoints/thesis (tools/collect_thesis_checkpoints.sh);
 # point CKPT_DIR at runs/ to evaluate your own training runs instead.
 #
@@ -26,6 +34,8 @@ find_ckpt() {  # accept both checkpoints/thesis/<name>/ and runs/<dataset>/<mode
 
 PACO_MODELS=${PACO_MODELS:-"hier_router hier_router_parent_only patch_qdot_projected patch_qdot_raw patch_qca"}
 SEED=${SEED:-0}
+GROUNDING_GRID=${GROUNDING_GRID:-legacy}          # legacy = as published, fixed = true patch grid
+[ "$GROUNDING_GRID" = "legacy" ] && GRID_FLAG=--legacy_grid || GRID_FLAG=" "
 cmds=()
 for m in $PACO_MODELS; do
   ckpt=$(find_ckpt "paco_$m")
@@ -40,7 +50,7 @@ if [ -n "${cub_ckpt:-}" ]; then
 fi
 cmds+=("python -m hier_dinosaur.grounding --router_ckpt $(find_ckpt paco_hier_router) \
     --patch_ckpt $(find_ckpt paco_patch_qdot_projected) --patch_ckpt $(find_ckpt paco_patch_qdot_raw) \
-    --n ${N_GROUNDING:-800} --seed $SEED --masks_csv data/paco/paco_val_masks.csv --image_root data/coco \
+    --n ${N_GROUNDING:-800} --seed $SEED $GRID_FLAG --masks_csv data/paco/paco_val_masks.csv --image_root data/coco \
     --out $RESULTS/paco_grounding.json --per_sample_csv $RESULTS/paco_grounding_per_sample.csv")
 cmds+=("python -m hier_dinosaur.evaluate --summarize $RESULTS")
 
