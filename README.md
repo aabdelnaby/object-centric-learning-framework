@@ -1,7 +1,6 @@
 # Hierarchical-DINOSAUR and the HierRouter
 
-Code for the master's thesis *Hierarchical Representations via Object-Centric Learning*. It contains what is needed to reproduce the experiments reported in the thesis, and
-nothing else.
+Code for the master's thesis *Hierarchical Representations via Object-Centric Learning*. It contains what is needed to reproduce the experiments reported in the thesis.
 
 **The method.** A frozen DINOv3 ViT-S/16 and a frozen DINOSAUR slot-attention module give
 object-level slots for an image. *Hierarchical-DINOSAUR* re-runs that same frozen slot attention
