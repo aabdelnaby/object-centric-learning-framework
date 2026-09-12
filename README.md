@@ -1,7 +1,6 @@
 # Hierarchical-DINOSAUR and the HierRouter
 
-Code for the master's thesis *Hierarchical Object-Centric Inference over Self-Supervised Visual
-Features*. It contains what is needed to reproduce the experiments reported in the thesis, and
+Code for the master's thesis *Hierarchical Representations vis Object-Centric Learning*. It contains what is needed to reproduce the experiments reported in the thesis, and
 nothing else.
 
 **The method.** A frozen DINOv3 ViT-S/16 and a frozen DINOSAUR slot-attention module give
